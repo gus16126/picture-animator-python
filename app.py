@@ -420,24 +420,29 @@ class Animator(tk.Tk):
         try:
             rate=max(.1,float(self.fps.get()));images=[self.frame_image(f) for f in self.frames]
             width=max(im.width for im in images);height=max(im.height for im in images);width+=width%2;height+=height%2
-            with tempfile.TemporaryDirectory() as d:
-                output_index=0
+            total_steps=sum(max(1,math.ceil(self.frame_duration(f)*rate)) for f in self.frames)
+            command=[str(ff),'-y','-loglevel','error','-f','rawvideo','-pix_fmt','rgb24','-s:v',f'{width}x{height}','-framerate',str(rate),'-i','-']
+            if self.audio_path and self.audio_path.exists():command += ['-stream_loop','-1','-i',str(self.audio_path),'-shortest','-c:a','aac']
+            suffix=Path(target).suffix.lower()
+            if suffix=='.gif':command += ['-vf','fps='+str(rate)+',scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos',target]
+            elif suffix=='.webm':command += ['-c:v','libvpx-vp9','-crf','32','-b:v','0',target]
+            else:command += ['-c:v','libx264','-pix_fmt','yuv420p','-movflags','+faststart',target]
+            process=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            output_index=0
+            try:
                 for index,f in enumerate(self.frames):
                     steps=max(1,math.ceil(self.frame_duration(f)*rate))
                     for step in range(steps):
                         im=self.transition_image(index,step/rate)
                         canvas=Image.new('RGB',(width,height),'black');canvas.paste(im,((width-im.width)//2,(height-im.height)//2))
-                        canvas.save(Path(d)/f'{output_index:05d}.png');output_index+=1
-                command=[str(ff),'-y','-framerate',str(rate),'-i',str(Path(d)/'%05d.png')]
-                if self.audio_path and self.audio_path.exists():command += ['-stream_loop','-1','-i',str(self.audio_path),'-shortest','-c:a','aac']
-                suffix=Path(target).suffix.lower()
-                if suffix=='.gif':command += ['-vf','fps='+str(rate)+',scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos',target]
-                elif suffix=='.webm':command += ['-c:v','libvpx-vp9','-crf','32','-b:v','0',target]
-                else:command += ['-c:v','libx264','-pix_fmt','yuv420p','-movflags','+faststart',target]
-                subprocess.run(command,check=True,capture_output=True,text=True)
+                        process.stdin.write(canvas.tobytes());output_index+=1
+                        if output_index==total_steps or output_index%max(1,int(rate))==0:
+                            self.status.set(f"Exporting: {output_index}/{total_steps} frames ({output_index*100//total_steps}%)");self.update_idletasks()
+                process.stdin.close();result=process.wait();detail=process.stderr.read().decode(errors='replace').strip()
+                if result:raise RuntimeError(detail or f'FFmpeg exited with code {result}.')
+            finally:
+                if process.stdin and not process.stdin.closed:process.stdin.close()
+                if process.poll() is None:process.terminate()
             self.status.set(f"MP4 exported: {Path(target).name}")
-        except subprocess.CalledProcessError as e:
-            detail=(e.stderr or e.stdout or str(e)).strip()
-            messagebox.showerror(APP,f"MP4 export failed:\n{detail[-3000:]}")
         except Exception as e:messagebox.showerror(APP,f"MP4 export failed:\n{e}")
 if __name__=='__main__':Animator().mainloop()
