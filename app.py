@@ -46,8 +46,13 @@ class Animator(tk.Tk):
         self.canvas=tk.Canvas(middle,bg="#e9edf3",highlightthickness=0);self.canvas.pack(fill="both",expand=True,pady=(5,0));self.canvas.bind("<Configure>",lambda e:self.render_timeline() if self.timeline_active else self.draw());self.canvas.bind("<ButtonPress-1>",self.down);self.canvas.bind("<B1-Motion>",self.motion);self.canvas.bind("<ButtonRelease-1>",self.up);self.canvas.bind("<Button-3>",self.canvas_menu)
         transport=ttk.Frame(middle);transport.pack(fill="x",pady=(6,0));self.play_button=ttk.Button(transport,text="▶ Play",command=self.toggle_play);self.play_button.pack(side="left");self.timeline=tk.DoubleVar(value=0);self.timeline_scale=ttk.Scale(transport,from_=0,to=1,variable=self.timeline,command=self.seek_timeline);self.timeline_scale.pack(side="left",fill="x",expand=True,padx=8);self.timeline_text=tk.StringVar(value="0:00.0 / 0:00.0");ttk.Label(transport,textvariable=self.timeline_text,width=15).pack(side="right")
         right=ttk.Frame(body,padding=8);body.add(right,weight=1)
-        ttk.Button(right,text="+ Add label",command=self.add_label).pack(fill="x")
-        ttk.Button(right,text="Delete label",command=self.delete_label).pack(fill="x",pady=4)
+        label_actions=ttk.Menubutton(right,text="Label actions ▾")
+        label_actions.pack(fill="x")
+        label_menu=tk.Menu(label_actions,tearoff=0)
+        label_menu.add_command(label="Add label",command=self.add_label)
+        label_menu.add_command(label="Delete selected label",command=self.delete_label)
+        label_menu.configure(postcommand=lambda:label_menu.entryconfigure(1,state="normal" if self.label() else "disabled"))
+        label_actions.configure(menu=label_menu)
         self.preset_choice=tk.StringVar();self.preset_input=ttk.Combobox(right,values=sorted(self.presets),textvariable=self.preset_choice,state="readonly");self.preset_input.pack(fill="x",pady=(8,0));ttk.Button(right,text="Save preset",command=self.save_preset).pack(fill="x",pady=(4,0));ttk.Button(right,text="Apply preset",command=self.apply_preset_to_matching).pack(fill="x",pady=4)
         self.fields={}
         for key,title in [("text","Text"),("shape","Shape"),("animation","Animation"),("anim_duration","Animation time (s)"),("font","Font"),("size","Text size"),("color","Text color"),("bg","Background"),("outline","Outline"),("opacity","Opacity"),("rotation","Rotation"),("delay","Appear after (s)")]:
