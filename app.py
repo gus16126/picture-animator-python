@@ -39,16 +39,16 @@ class Animator(tk.Tk):
         ttk.Label(left,text="Transition duration (seconds)").pack(anchor="w");self.transition_duration_value=tk.StringVar(value="0.3");self.transition_duration_input=ttk.Spinbox(left,from_=0.1,to=10,increment=.1,textvariable=self.transition_duration_value,width=8,command=self.apply_transition);self.transition_duration_input.pack(anchor="w");self.transition_duration_input.bind("<KeyRelease>",lambda e:self.apply_transition());self.transition_duration_input.bind("<FocusOut>",lambda e:self.apply_transition())
         ttk.Button(left,text="Apply timing to selected",command=self.apply_timing_to_selected).pack(anchor="w",pady=(5,0))
         ttk.Label(left,text="Export FPS").pack(anchor="w",pady=(7,0)); self.fps=tk.DoubleVar(value=10); ttk.Spinbox(left,from_=1,to=30,increment=1,textvariable=self.fps,width=8).pack(anchor="w")
-        middle=ttk.Frame(body,padding=8);body.add(middle,weight=4)
-        ttk.Label(middle,text="Preview — drag labels to position them",font=("Segoe UI",10,"bold")).pack(anchor="w")
-        self.canvas=tk.Canvas(middle,bg="#e9edf3",highlightthickness=0);self.canvas.pack(fill="both",expand=True,pady=(5,0));self.canvas.bind("<Configure>",lambda e:self.render_timeline() if self.timeline_active else self.draw());self.canvas.bind("<ButtonPress-1>",self.down);self.canvas.bind("<B1-Motion>",self.motion);self.canvas.bind("<ButtonRelease-1>",self.up)
+        middle=ttk.Frame(body,padding=8);body.add(middle,weight=6)
+        ttk.Label(middle,text="Preview — drag labels; right-click to add/delete",font=("Segoe UI",10,"bold")).pack(anchor="w")
+        self.canvas=tk.Canvas(middle,bg="#e9edf3",highlightthickness=0);self.canvas.pack(fill="both",expand=True,pady=(5,0));self.canvas.bind("<Configure>",lambda e:self.render_timeline() if self.timeline_active else self.draw());self.canvas.bind("<ButtonPress-1>",self.down);self.canvas.bind("<B1-Motion>",self.motion);self.canvas.bind("<ButtonRelease-1>",self.up);self.canvas.bind("<Button-3>",self.canvas_menu)
         transport=ttk.Frame(middle);transport.pack(fill="x",pady=(6,0));self.play_button=ttk.Button(transport,text="▶ Play",command=self.toggle_play);self.play_button.pack(side="left");self.timeline=tk.DoubleVar(value=0);self.timeline_scale=ttk.Scale(transport,from_=0,to=1,variable=self.timeline,command=self.seek_timeline);self.timeline_scale.pack(side="left",fill="x",expand=True,padx=8);self.timeline_text=tk.StringVar(value="0:00.0 / 0:00.0");ttk.Label(transport,textvariable=self.timeline_text,width=15).pack(side="right")
         right=ttk.Frame(body,padding=8);body.add(right,weight=1)
         ttk.Button(right,text="+ Add label",command=self.add_label).pack(fill="x")
         ttk.Button(right,text="Delete label",command=self.delete_label).pack(fill="x",pady=4)
-        self.preset_choice=tk.StringVar();self.preset_input=ttk.Combobox(right,values=sorted(self.presets),textvariable=self.preset_choice,state="readonly");self.preset_input.pack(fill="x",pady=(8,0));ttk.Button(right,text="Save label style as preset",command=self.save_preset).pack(fill="x",pady=(4,0));ttk.Button(right,text="Apply preset to matching labels",command=self.apply_preset_to_matching).pack(fill="x",pady=4)
+        self.preset_choice=tk.StringVar();self.preset_input=ttk.Combobox(right,values=sorted(self.presets),textvariable=self.preset_choice,state="readonly");self.preset_input.pack(fill="x",pady=(8,0));ttk.Button(right,text="Save preset",command=self.save_preset).pack(fill="x",pady=(4,0));ttk.Button(right,text="Apply preset",command=self.apply_preset_to_matching).pack(fill="x",pady=4)
         self.fields={}
-        for key,title in [("text","Text"),("shape","Shape"),("font","Font"),("size","Text size"),("color","Text color (#RRGGBB)"),("bg","Background (#RRGGBB)"),("outline","Outline (#RRGGBB, optional)"),("opacity","Opacity (0-100)"),("rotation","Rotation (degrees)"),("delay","Appear after (seconds)"),("animation","Animation"),("anim_duration","Animation time (seconds)")]:
+        for key,title in [("text","Text"),("shape","Shape"),("font","Font"),("size","Text size"),("color","Text color"),("bg","Background"),("outline","Outline"),("opacity","Opacity"),("rotation","Rotation"),("delay","Appear after (s)"),("animation","Animation"),("anim_duration","Animation time (s)")]:
             ttk.Label(right,text=title).pack(anchor="w",pady=(7,0))
             if key=="shape": w=ttk.Combobox(right,values=SHAPES,state="readonly")
             elif key=="font": w=ttk.Combobox(right,values=FONTS,state="readonly")
@@ -313,6 +313,14 @@ class Animator(tk.Tk):
         if not l or not self.drag:return
         x,y,w,h=self.origin;l['x']=max(0,min(1,(e.x-x)/w));l['y']=max(0,min(1,(e.y-y)/h));self.draw()
     def up(self,e):self.drag=None
+    def canvas_menu(self,event):
+        if self.current<0:return
+        self.down(event);self.drag=None
+        menu=tk.Menu(self,tearoff=0)
+        menu.add_command(label="Add label",command=self.add_label)
+        menu.add_command(label="Delete label",command=self.delete_label,state="normal" if self.selected else "disabled")
+        try:menu.tk_popup(event.x_root,event.y_root)
+        finally:menu.grab_release()
     def save_data(self,path):
         temp=Path(str(path)+'.tmp')
         try:
