@@ -13,6 +13,7 @@ SHAPES = ("Box", "Right arrow", "Left arrow", "Up arrow", "Down arrow")
 TRANSITIONS = ("Cut", "Fade", "Slide left", "Slide right", "Zoom")
 ANIMATIONS = ("None", "Fade in", "Fade out", "Slide left", "Slide right", "Pop", "Typewriter")
 LABEL_PAD = 24
+ARROW_TIP = 36
 FONTS = ("Arial Bold", "Segoe UI Bold", "Calibri Bold")
 PRESETS_FILE = Path(__file__).with_name("label_presets.json")
 STYLE_KEYS = ("shape", "font", "size", "color", "bg", "outline", "opacity", "rotation")
@@ -290,16 +291,12 @@ class Animator(tk.Tk):
         try:im=self.transition_image(self.current,local_time)
         except (OSError, ValueError, UnidentifiedImageError) as e:self.status.set(f"Could not display this picture: {e}");return
         cw,ch=self.canvas.winfo_width(),self.canvas.winfo_height();self.scale=min(max(1,cw)/im.width,max(1,ch)/im.height);w,h=int(im.width*self.scale),int(im.height*self.scale);x,y=(cw-w)//2,(ch-h)//2;self.origin=(x,y,w,h);self.tkimg=ImageTk.PhotoImage(im.resize((w,h),Image.Resampling.LANCZOS));self.canvas.create_image(x,y,anchor="nw",image=self.tkimg)
-        if self.selected and local_time is None:
-            label=self.label()
-            if label:
-                tw,th=self._label_box(label);tw*=self.scale;th*=self.scale;px=x+label['x']*w;py=y+label['y']*h;self.canvas.create_polygon(self.shape(label['shape'],px,py,tw,th),fill='',outline='#111',width=2)
     def shape(self,s,x,y,w,h):
-        a=w/2;b=h/2
-        if s=='Right arrow':return [x-a,y-b,x+a-18,y-b,x+a,y,x+a-18,y+b,x-a,y+b]
-        if s=='Left arrow':return [x-a+18,y-b,x+a,y-b,x+a,y+b,x-a+18,y+b,x-a,y]
-        if s=='Up arrow':return [x,y-b,x+a,y-b+18,x+a,y+b,x-a,y+b,x-a,y-b+18]
-        if s=='Down arrow':return [x-a,y-b,x+a,y-b,x+a,y+b-18,x,y+b,x-a,y+b-18]
+        a=w/2;b=h/2;tip=min(ARROW_TIP,max(12,min(w*.4,h*.9)))
+        if s=='Right arrow':return [x-a,y-b,x+a-tip,y-b,x+a,y,x+a-tip,y+b,x-a,y+b]
+        if s=='Left arrow':return [x-a+tip,y-b,x+a,y-b,x+a,y+b,x-a+tip,y+b,x-a,y]
+        if s=='Up arrow':return [x,y-b,x+a,y-b+tip,x+a,y+b,x-a,y+b,x-a,y-b+tip]
+        if s=='Down arrow':return [x-a,y-b,x+a,y-b,x+a,y+b-tip,x,y+b,x-a,y+b-tip]
         return [x-a,y-b,x+a,y-b,x+a,y+b,x-a,y+b]
     def down(self,e):
         if self.current<0:return
@@ -360,7 +357,11 @@ class Animator(tk.Tk):
         return int(box[2]-box[0]),int(box[3]-box[1])
     def _label_box(self, label):
         bw,bh=self._text_measure(label)
-        return max(65,bw+2*LABEL_PAD),max(28,bh+2*LABEL_PAD)
+        width=max(65,bw+2*LABEL_PAD)
+        height=max(28,bh+2*LABEL_PAD)
+        if label.get('shape') in ('Right arrow','Left arrow'):width+=ARROW_TIP
+        if label.get('shape') in ('Up arrow','Down arrow'):height+=ARROW_TIP
+        return width,height
     def draw_export_label(self, image, label, progress=1.0, alpha=1.0):
         anim=label.get('animation','None');font=self.font_for_export(label['size'],label.get('font','Arial Bold'));spacing=self._line_spacing(label);w,h=self._label_box(label);opacity=int(max(0,min(100,label.get('opacity',100)))*2.55*alpha)
         if opacity<=0:return
@@ -371,10 +372,10 @@ class Animator(tk.Tk):
         outline=label.get('outline','');draw.polygon(self.shape(label['shape'],cx,cy,w,h),fill=rgba(label['bg'],'#5B46C8'),outline=rgba(outline,'#000000') if outline else None,width=2)
         shown=label['text'][:max(1,int(len(label['text'])*progress))] if anim=='Typewriter' else label['text']
         tx,ty=cx,cy
-        if label['shape']=='Right arrow':tx=cx-9
-        elif label['shape']=='Left arrow':tx=cx+9
-        elif label['shape']=='Up arrow':ty=cy+9
-        elif label['shape']=='Down arrow':ty=cy-9
+        if label['shape']=='Right arrow':tx=cx-ARROW_TIP/2
+        elif label['shape']=='Left arrow':tx=cx+ARROW_TIP/2
+        elif label['shape']=='Up arrow':ty=cy+ARROW_TIP/2
+        elif label['shape']=='Down arrow':ty=cy-ARROW_TIP/2
         draw.multiline_text((tx,ty),shown,font=font,fill=rgba(label['color'],'#FFFFFF'),anchor='mm',align='center',spacing=spacing,stroke_width=1 if outline else 0,stroke_fill=rgba(outline,'#000000') if outline else None)
         shadow=Image.new('RGBA',layer.size,(0,0,0,0));shadow.alpha_composite(layer,(3,3));shadow.putalpha(shadow.getchannel('A').point(lambda a:a//3));rotated=Image.alpha_composite(shadow,layer).rotate(-float(label.get('rotation',0)),resample=Image.Resampling.BICUBIC,expand=True)
         if anim=='Pop':
