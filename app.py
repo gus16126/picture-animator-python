@@ -12,6 +12,7 @@ FFMPEG = Path.home() / "ffmpeg.exe"
 SHAPES = ("Box", "Right arrow", "Left arrow", "Up arrow", "Down arrow")
 TRANSITIONS = ("Cut", "Fade", "Slide left", "Slide right", "Zoom")
 ANIMATIONS = ("None", "Fade in", "Fade out", "Slide left", "Slide right", "Pop", "Typewriter")
+LABEL_PAD = 24
 FONTS = ("Arial Bold", "Segoe UI Bold", "Calibri Bold")
 PRESETS_FILE = Path(__file__).with_name("label_presets.json")
 STYLE_KEYS = ("shape", "font", "size", "color", "bg", "outline", "opacity", "rotation")
@@ -292,7 +293,7 @@ class Animator(tk.Tk):
         if self.selected and local_time is None:
             label=self.label()
             if label:
-                bw,bh=self._text_measure(label);tw=max(65,bw+24)*self.scale;th=max(28,bh+24)*self.scale;px=x+label['x']*w;py=y+label['y']*h;self.canvas.create_polygon(self.shape(label['shape'],px,py,tw,th),fill='',outline='#111',width=2)
+                tw,th=self._label_box(label);tw*=self.scale;th*=self.scale;px=x+label['x']*w;py=y+label['y']*h;self.canvas.create_polygon(self.shape(label['shape'],px,py,tw,th),fill='',outline='#111',width=2)
     def shape(self,s,x,y,w,h):
         a=w/2;b=h/2
         if s=='Right arrow':return [x-a,y-b,x+a-18,y-b,x+a,y,x+a-18,y+b,x-a,y+b]
@@ -305,7 +306,7 @@ class Animator(tk.Tk):
         self.stop_playback();self.timeline_active=False
         self.draw();x,y,w,h=self.origin
         for label in reversed(self.frames[self.current]['labels']):
-            bw,bh=self._text_measure(label);tw=max(65,bw+24)*self.scale;th=max(28,bh+24)*self.scale;px=x+label['x']*w;py=y+label['y']*h
+            tw,th=self._label_box(label);tw*=self.scale;th*=self.scale;px=x+label['x']*w;py=y+label['y']*h
             if px-tw/2<=e.x<=px+tw/2 and py-th/2<=e.y<=py+th/2:self.selected=label['id'];self.drag=(e.x,e.y);self.draw();self.load_fields();return
         self.selected=None;self.draw();self.load_fields()
     def motion(self,e):
@@ -357,8 +358,11 @@ class Animator(tk.Tk):
         font=self.font_for_export(label['size'],label.get('font','Arial Bold'));spacing=self._line_spacing(label)
         box=ImageDraw.Draw(Image.new('RGBA',(1,1))).multiline_textbbox((0,0),label['text'],font=font,anchor='mm',align='center',spacing=spacing)
         return int(box[2]-box[0]),int(box[3]-box[1])
+    def _label_box(self, label):
+        bw,bh=self._text_measure(label)
+        return max(65,bw+2*LABEL_PAD),max(28,bh+2*LABEL_PAD)
     def draw_export_label(self, image, label, progress=1.0, alpha=1.0):
-        anim=label.get('animation','None');font=self.font_for_export(label['size'],label.get('font','Arial Bold'));spacing=self._line_spacing(label);measure=ImageDraw.Draw(Image.new('RGBA',(1,1))).multiline_textbbox((0,0),label['text'],font=font,anchor='mm',align='center',spacing=spacing);pad=12;w=max(65,int(measure[2]-measure[0])+pad*2);h=max(28,int(measure[3]-measure[1])+pad*2);opacity=int(max(0,min(100,label.get('opacity',100)))*2.55*alpha)
+        anim=label.get('animation','None');font=self.font_for_export(label['size'],label.get('font','Arial Bold'));spacing=self._line_spacing(label);w,h=self._label_box(label);opacity=int(max(0,min(100,label.get('opacity',100)))*2.55*alpha)
         if opacity<=0:return
         layer=Image.new('RGBA',(w+40,h+40),(0,0,0,0));draw=ImageDraw.Draw(layer);cx,cy=layer.width//2,layer.height//2
         def rgba(color,fallback):
@@ -366,7 +370,12 @@ class Animator(tk.Tk):
             except (ValueError,TypeError):return ImageColor.getrgb(fallback)+(opacity,)
         outline=label.get('outline','');draw.polygon(self.shape(label['shape'],cx,cy,w,h),fill=rgba(label['bg'],'#5B46C8'),outline=rgba(outline,'#000000') if outline else None,width=2)
         shown=label['text'][:max(1,int(len(label['text'])*progress))] if anim=='Typewriter' else label['text']
-        draw.multiline_text((cx,cy),shown,font=font,fill=rgba(label['color'],'#FFFFFF'),anchor='mm',align='center',spacing=spacing,stroke_width=1 if outline else 0,stroke_fill=rgba(outline,'#000000') if outline else None)
+        tx,ty=cx,cy
+        if label['shape']=='Right arrow':tx=cx-9
+        elif label['shape']=='Left arrow':tx=cx+9
+        elif label['shape']=='Up arrow':ty=cy+9
+        elif label['shape']=='Down arrow':ty=cy-9
+        draw.multiline_text((tx,ty),shown,font=font,fill=rgba(label['color'],'#FFFFFF'),anchor='mm',align='center',spacing=spacing,stroke_width=1 if outline else 0,stroke_fill=rgba(outline,'#000000') if outline else None)
         shadow=Image.new('RGBA',layer.size,(0,0,0,0));shadow.alpha_composite(layer,(3,3));shadow.putalpha(shadow.getchannel('A').point(lambda a:a//3));rotated=Image.alpha_composite(shadow,layer).rotate(-float(label.get('rotation',0)),resample=Image.Resampling.BICUBIC,expand=True)
         if anim=='Pop':
             scale=max(.05,.3+.7*progress);rotated=rotated.resize((max(1,int(rotated.width*scale)),max(1,int(rotated.height*scale))),Image.Resampling.LANCZOS)
