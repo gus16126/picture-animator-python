@@ -11,6 +11,7 @@ APP = "Picture Animator"
 FFMPEG = Path.home() / "ffmpeg.exe"
 SHAPES = ("Box", "Right arrow", "Left arrow", "Up arrow", "Down arrow")
 TRANSITIONS = ("Cut", "Fade", "Slide left", "Slide right", "Zoom")
+ANIMATIONS = ("None", "Fade in", "Fade out", "Slide left", "Slide right", "Pop", "Typewriter")
 FONTS = ("Arial Bold", "Segoe UI Bold", "Calibri Bold")
 PRESETS_FILE = Path(__file__).with_name("label_presets.json")
 STYLE_KEYS = ("shape", "font", "size", "color", "bg", "outline", "opacity", "rotation")
@@ -47,10 +48,12 @@ class Animator(tk.Tk):
         ttk.Button(right,text="Delete label",command=self.delete_label).pack(fill="x",pady=4)
         self.preset_choice=tk.StringVar();self.preset_input=ttk.Combobox(right,values=sorted(self.presets),textvariable=self.preset_choice,state="readonly");self.preset_input.pack(fill="x",pady=(8,0));ttk.Button(right,text="Save label style as preset",command=self.save_preset).pack(fill="x",pady=(4,0));ttk.Button(right,text="Apply preset to matching labels",command=self.apply_preset_to_matching).pack(fill="x",pady=4)
         self.fields={}
-        for key,title in [("text","Text"),("shape","Shape"),("font","Font"),("size","Text size"),("color","Text color (#RRGGBB)"),("bg","Background (#RRGGBB)"),("outline","Outline (#RRGGBB, optional)"),("opacity","Opacity (0-100)"),("rotation","Rotation (degrees)"),("delay","Appear after (seconds)")]:
+        for key,title in [("text","Text"),("shape","Shape"),("font","Font"),("size","Text size"),("color","Text color (#RRGGBB)"),("bg","Background (#RRGGBB)"),("outline","Outline (#RRGGBB, optional)"),("opacity","Opacity (0-100)"),("rotation","Rotation (degrees)"),("delay","Appear after (seconds)"),("animation","Animation"),("anim_duration","Animation time (seconds)")]:
             ttk.Label(right,text=title).pack(anchor="w",pady=(7,0))
             if key=="shape": w=ttk.Combobox(right,values=SHAPES,state="readonly")
             elif key=="font": w=ttk.Combobox(right,values=FONTS,state="readonly")
+            elif key=="animation": w=ttk.Combobox(right,values=ANIMATIONS,state="readonly")
+            elif key=="text": w=tk.Text(right,height=3,wrap="word")
             else:w=ttk.Entry(right)
             w.pack(fill="x");w.bind("<KeyRelease>",lambda e:self.apply_fields());w.bind("<<ComboboxSelected>>",lambda e:self.apply_fields());self.fields[key]=w
         self.status=tk.StringVar(value="Add pictures to begin.");ttk.Label(self,textvariable=self.status,anchor="w",padding=6).pack(fill="x")
@@ -130,12 +133,9 @@ class Animator(tk.Tk):
         for frame in frames:frame['duration']=duration;frame['transition']=self.transition.get();frame['transition_duration']=transition_duration
         self.update_timeline();self.status.set(f'Applied timing to {len(frames)} frame(s).')
     def refresh(self):
-        self.listbox.delete(0,"end");self.thumbnails=[]
+        self.listbox.delete(0,"end")
         for i,f in enumerate(self.frames):
             self.listbox.insert("end",f"{i+1}. {f['name']}")
-            try:
-                thumb=self.frame_image(f);thumb.thumbnail((72,54),Image.Resampling.LANCZOS);photo=ImageTk.PhotoImage(thumb);self.thumbnails.append(photo);self.listbox.itemconfig(i,image=photo,compound='left')
-            except (OSError,ValueError,UnidentifiedImageError):pass
         if self.current>=0 and self.frames:self.listbox.selection_set(self.current)
         self.timeline_active=False;self.update_timeline();self.draw();self.load_fields();self.load_duration();self.load_transition()
     def pick_frame(self,e=None):
@@ -190,18 +190,20 @@ class Animator(tk.Tk):
         self.draw();self.load_fields();self.status.set(f"Applied preset to {changed} label(s) named {label.get('text')!r}.")
     def add_label(self):
         if self.current<0:return
-        l={"id":os.urandom(6).hex(),"text":"Your label","shape":"Box","font":"Arial Bold","x":.5,"y":.5,"size":28,"color":"#FFFFFF","bg":"#5B46C8","outline":"","opacity":100,"rotation":0,"delay":0};self.frames[self.current]['labels'].append(l);self.selected=l['id'];self.draw();self.load_fields()
+        l={"id":os.urandom(6).hex(),"text":"Your label","shape":"Box","font":"Arial Bold","x":.5,"y":.5,"size":28,"color":"#FFFFFF","bg":"#5B46C8","outline":"","opacity":100,"rotation":0,"animation":"None","anim_duration":.5,"delay":0};self.frames[self.current]['labels'].append(l);self.selected=l['id'];self.draw();self.load_fields()
     def delete_label(self):
         if self.current<0 or not self.selected:return
         self.frames[self.current]['labels']=[x for x in self.frames[self.current]['labels'] if x['id']!=self.selected];self.selected=None;self.draw();self.load_fields()
     def load_fields(self):
         l=self.label()
-        for key,w in self.fields.items():w.delete(0,"end");w.insert(0,str(l[key]) if l else "")
+        for key,w in self.fields.items():
+            if key=="text":w.delete("1.0","end");w.insert("1.0",str(l[key]) if l else "")
+            else:w.delete(0,"end");w.insert(0,str(l[key]) if l else "")
     def valid_color(self, value): return bool(re.fullmatch(r"#[0-9a-fA-F]{6}", value))
     def apply_fields(self):
         l=self.label()
         if not l:return
-        l['text']=self.fields['text'].get();l['shape']=self.fields['shape'].get() or 'Box';l['font']=self.fields['font'].get() or 'Arial Bold'
+        l['text']=self.fields['text'].get("1.0","end-1c");l['shape']=self.fields['shape'].get() or 'Box';l['font']=self.fields['font'].get() or 'Arial Bold'
         try:l['size']=max(8,int(self.fields['size'].get()))
         except ValueError:pass
         color=self.fields['color'].get();bg=self.fields['bg'].get()
@@ -214,6 +216,10 @@ class Animator(tk.Tk):
         try:l['rotation']=float(self.fields['rotation'].get())
         except ValueError:pass
         try:l['delay']=max(0,float(self.fields['delay'].get() or 0))
+        except ValueError:pass
+        anim=self.fields['animation'].get()
+        if anim in ANIMATIONS:l['animation']=anim
+        try:l['anim_duration']=max(.1,float(self.fields['anim_duration'].get() or .5))
         except ValueError:pass
         self.draw()
     def render_timeline(self):
@@ -243,9 +249,22 @@ class Animator(tk.Tk):
             self.timeline.set(total);self.render_timeline();self.stop_playback();return
         self.timeline.set(position);self.render_timeline();self.after(30,self.play_tick)
     def render_frame_image(self, frame, local_time=None):
-        image=self.frame_image(frame)
+        image=self.frame_image(frame);duration=self.frame_duration(frame)
         for label in frame['labels']:
-            if local_time is None or label['delay']<=local_time:self.draw_export_label(image,label)
+            delay=label.get('delay',0);anim=label.get('animation','None');adur=max(.1,float(label.get('anim_duration',.5)))
+            if local_time is None:
+                self.draw_export_label(image,label,1.0,1.0);continue
+            if anim=='Fade out':
+                if local_time<delay:continue
+                fade_start=max(delay,duration-adur)
+                alpha=1.0 if local_time<fade_start else max(0.0,1.0-(local_time-fade_start)/adur)
+                if alpha<=0:continue
+                self.draw_export_label(image,label,1.0,alpha)
+            else:
+                if local_time<delay:continue
+                p=1.0 if anim=='None' or local_time>=delay+adur else (local_time-delay)/adur
+                p=max(0.0,min(1.0,p));a=p if anim=='Fade in' else 1.0
+                self.draw_export_label(image,label,p,a)
         return image
     def center_on_canvas(self, image, width, height):
         canvas=Image.new('RGB',(width,height),'black');canvas.paste(image,((width-image.width)//2,(height-image.height)//2));return canvas
@@ -273,7 +292,7 @@ class Animator(tk.Tk):
         if self.selected and local_time is None:
             label=self.label()
             if label:
-                font=self.font_for_export(label['size']);box=ImageDraw.Draw(Image.new('RGB',(1,1))).textbbox((0,0),label['text'],font=font,anchor='mm');tw=max(65,box[2]-box[0]+24)*self.scale;th=max(28,box[3]-box[1]+24)*self.scale;px=x+label['x']*w;py=y+label['y']*h;self.canvas.create_polygon(self.shape(label['shape'],px,py,tw,th),fill='',outline='#111',width=2)
+                bw,bh=self._text_measure(label);tw=max(65,bw+24)*self.scale;th=max(28,bh+24)*self.scale;px=x+label['x']*w;py=y+label['y']*h;self.canvas.create_polygon(self.shape(label['shape'],px,py,tw,th),fill='',outline='#111',width=2)
     def shape(self,s,x,y,w,h):
         a=w/2;b=h/2
         if s=='Right arrow':return [x-a,y-b,x+a-18,y-b,x+a,y,x+a-18,y+b,x-a,y+b]
@@ -286,7 +305,7 @@ class Animator(tk.Tk):
         self.stop_playback();self.timeline_active=False
         self.draw();x,y,w,h=self.origin
         for label in reversed(self.frames[self.current]['labels']):
-            font=self.font_for_export(label['size']);box=ImageDraw.Draw(Image.new('RGB',(1,1))).textbbox((0,0),label['text'],font=font,anchor='mm');tw=max(65,box[2]-box[0]+24)*self.scale;th=max(28,box[3]-box[1]+24)*self.scale;px=x+label['x']*w;py=y+label['y']*h
+            bw,bh=self._text_measure(label);tw=max(65,bw+24)*self.scale;th=max(28,bh+24)*self.scale;px=x+label['x']*w;py=y+label['y']*h
             if px-tw/2<=e.x<=px+tw/2 and py-th/2<=e.y<=py+th/2:self.selected=label['id'];self.drag=(e.x,e.y);self.draw();self.load_fields();return
         self.selected=None;self.draw();self.load_fields()
     def motion(self,e):
@@ -317,7 +336,7 @@ class Animator(tk.Tk):
             for frame in self.frames:
                 frame.setdefault('duration',1.0);frame.setdefault('transition','Cut');frame.setdefault('transition_duration',.3)
                 for label in frame.get('labels',[]):
-                    label.setdefault('font','Arial Bold');label.setdefault('outline','');label.setdefault('opacity',100);label.setdefault('rotation',0)
+                    label.setdefault('font','Arial Bold');label.setdefault('outline','');label.setdefault('opacity',100);label.setdefault('rotation',0);label.setdefault('animation','None');label.setdefault('anim_duration',.5)
             self.project_path=Path(name);self.current=0 if self.frames else -1;self.selected=None;self._img_cache={};self.refresh();self.status.set(f"Opened: {self.project_path.name}")
         except Exception as e:messagebox.showerror(APP,f"Could not open project:\n{e}")
     def font_for_export(self, size, family='Arial Bold'):
@@ -325,16 +344,28 @@ class Animator(tk.Tk):
         for path in (paths.get(family), 'C:/Windows/Fonts/arialbd.ttf','C:/Windows/Fonts/segoeuib.ttf'):
             if Path(path).exists():return ImageFont.truetype(path,size)
         return ImageFont.load_default()
-    def draw_export_label(self, image, label):
-        font=self.font_for_export(label['size'],label.get('font','Arial Bold'));measure=ImageDraw.Draw(Image.new('RGBA',(1,1))).textbbox((0,0),label['text'],font=font,anchor='mm');pad=12;w=max(65,measure[2]-measure[0]+pad*2);h=max(28,measure[3]-measure[1]+pad*2);opacity=int(max(0,min(100,label.get('opacity',100)))*2.55)
+    def _line_spacing(self, label): return max(4, int(label['size'])//4)
+    def _text_measure(self, label):
+        font=self.font_for_export(label['size'],label.get('font','Arial Bold'));spacing=self._line_spacing(label)
+        box=ImageDraw.Draw(Image.new('RGBA',(1,1))).multiline_textbbox((0,0),label['text'],font=font,anchor='mm',align='center',spacing=spacing)
+        return int(box[2]-box[0]),int(box[3]-box[1])
+    def draw_export_label(self, image, label, progress=1.0, alpha=1.0):
+        anim=label.get('animation','None');font=self.font_for_export(label['size'],label.get('font','Arial Bold'));spacing=self._line_spacing(label);measure=ImageDraw.Draw(Image.new('RGBA',(1,1))).multiline_textbbox((0,0),label['text'],font=font,anchor='mm',align='center',spacing=spacing);pad=12;w=max(65,int(measure[2]-measure[0])+pad*2);h=max(28,int(measure[3]-measure[1])+pad*2);opacity=int(max(0,min(100,label.get('opacity',100)))*2.55*alpha)
+        if opacity<=0:return
         layer=Image.new('RGBA',(w+40,h+40),(0,0,0,0));draw=ImageDraw.Draw(layer);cx,cy=layer.width//2,layer.height//2
         def rgba(color,fallback):
             try:return ImageColor.getrgb(color)+(opacity,)
             except (ValueError,TypeError):return ImageColor.getrgb(fallback)+(opacity,)
         outline=label.get('outline','');draw.polygon(self.shape(label['shape'],cx,cy,w,h),fill=rgba(label['bg'],'#5B46C8'),outline=rgba(outline,'#000000') if outline else None,width=2)
-        draw.text((cx,cy),label['text'],font=font,fill=rgba(label['color'],'#FFFFFF'),anchor='mm',stroke_width=1 if outline else 0,stroke_fill=rgba(outline,'#000000') if outline else None)
+        shown=label['text'][:max(1,int(len(label['text'])*progress))] if anim=='Typewriter' else label['text']
+        draw.multiline_text((cx,cy),shown,font=font,fill=rgba(label['color'],'#FFFFFF'),anchor='mm',align='center',spacing=spacing,stroke_width=1 if outline else 0,stroke_fill=rgba(outline,'#000000') if outline else None)
         shadow=Image.new('RGBA',layer.size,(0,0,0,0));shadow.alpha_composite(layer,(3,3));shadow.putalpha(shadow.getchannel('A').point(lambda a:a//3));rotated=Image.alpha_composite(shadow,layer).rotate(-float(label.get('rotation',0)),resample=Image.Resampling.BICUBIC,expand=True)
-        x=int(label['x']*image.width-rotated.width/2);y=int(label['y']*image.height-rotated.height/2);image.paste(rotated,(x,y),rotated)
+        if anim=='Pop':
+            scale=max(.05,.3+.7*progress);rotated=rotated.resize((max(1,int(rotated.width*scale)),max(1,int(rotated.height*scale))),Image.Resampling.LANCZOS)
+        x=int(label['x']*image.width-rotated.width/2);y=int(label['y']*image.height-rotated.height/2)
+        if anim=='Slide left':x-=int((1.0-progress)*image.width)
+        elif anim=='Slide right':x+=int((1.0-progress)*image.width)
+        image.paste(rotated,(x,y),rotated)
     def export_mp4(self):
         if not self.frames:return
         target=filedialog.asksaveasfilename(defaultextension='.mp4',filetypes=[("MP4 video","*.mp4"),("WebM video","*.webm"),("Animated GIF","*.gif")])
