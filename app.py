@@ -53,7 +53,7 @@ class Animator(tk.Tk):
             if key=="shape": w=ttk.Combobox(right,values=SHAPES,state="readonly")
             elif key=="font": w=ttk.Combobox(right,values=FONTS,state="readonly")
             elif key=="animation": w=ttk.Combobox(right,values=ANIMATIONS,state="readonly")
-            elif key=="text": w=tk.Text(right,height=3,wrap="word")
+            elif key=="text": w=tk.Text(right,height=3,wrap="word",width=18)
             else:w=ttk.Entry(right)
             w.pack(fill="x");w.bind("<KeyRelease>",lambda e:self.apply_fields());w.bind("<<ComboboxSelected>>",lambda e:self.apply_fields());self.fields[key]=w
         self.status=tk.StringVar(value="Add pictures to begin.");ttk.Label(self,textvariable=self.status,anchor="w",padding=6).pack(fill="x")
