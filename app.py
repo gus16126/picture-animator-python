@@ -11,7 +11,7 @@ APP = "Picture Animator"
 FFMPEG = Path.home() / "ffmpeg.exe"
 SHAPES = ("Box", "Right arrow", "Left arrow", "Up arrow", "Down arrow")
 TRANSITIONS = ("Cut", "Fade", "Slide left", "Slide right", "Zoom")
-ANIMATIONS = ("None", "Fade in", "Fade out", "Slide left", "Slide right", "Pop", "Typewriter")
+ANIMATIONS = ("None", "Fade in", "Fade out", "Slide left", "Slide right", "Pop", "Pulse", "Bounce", "Wiggle", "Typewriter")
 LABEL_PAD = 24
 ARROW_TIP = 48
 FONTS = ("Arial Bold", "Segoe UI Bold", "Calibri Bold")
@@ -264,9 +264,15 @@ class Animator(tk.Tk):
                 self.draw_export_label(image,label,1.0,alpha)
             else:
                 if local_time<delay:continue
-                p=1.0 if anim=='None' or local_time>=delay+adur else (local_time-delay)/adur
-                p=max(0.0,min(1.0,p));a=p if anim=='Fade in' else 1.0
-                self.draw_export_label(image,label,p,a)
+                elapsed=local_time-delay;offset_x=0;offset_y=0;extra_rotation=0
+                if anim=='Pulse':p=1+.12*(1-math.cos(elapsed*2*math.pi*1.5))/2
+                else:p=max(0.0,min(1.0,1.0 if anim=='None' or local_time>=delay+adur else elapsed/adur))
+                if anim=='Bounce':offset_y=-max(8,image.height*.035)*abs(math.sin(elapsed*2*math.pi*1.5))
+                elif anim=='Wiggle':
+                    offset_x=image.width*.018*math.sin(elapsed*2*math.pi*3)
+                    extra_rotation=7*math.sin(elapsed*2*math.pi*3)
+                a=p if anim=='Fade in' else 1.0
+                self.draw_export_label(image,label,p,a,offset_x,offset_y,extra_rotation)
         return image
     def center_on_canvas(self, image, width, height):
         canvas=Image.new('RGB',(width,height),'black');canvas.paste(image,((width-image.width)//2,(height-image.height)//2));return canvas
@@ -362,7 +368,7 @@ class Animator(tk.Tk):
         if label.get('shape') in ('Right arrow','Left arrow'):width+=ARROW_TIP
         if label.get('shape') in ('Up arrow','Down arrow'):height+=ARROW_TIP
         return width,height
-    def draw_export_label(self, image, label, progress=1.0, alpha=1.0):
+    def draw_export_label(self, image, label, progress=1.0, alpha=1.0, offset_x=0, offset_y=0, extra_rotation=0):
         anim=label.get('animation','None');font=self.font_for_export(label['size'],label.get('font','Arial Bold'));spacing=self._line_spacing(label);w,h=self._label_box(label);opacity=int(max(0,min(100,label.get('opacity',100)))*2.55*alpha)
         if opacity<=0:return
         layer=Image.new('RGBA',(w+40,h+40),(0,0,0,0));draw=ImageDraw.Draw(layer);cx,cy=layer.width//2,layer.height//2
@@ -378,9 +384,10 @@ class Animator(tk.Tk):
         elif label['shape']=='Down arrow':ty=cy-ARROW_TIP/2
         draw.multiline_text((tx,ty),shown,font=font,fill=rgba(label['color'],'#FFFFFF'),anchor='mm',align='center',spacing=spacing,stroke_width=1 if outline else 0,stroke_fill=rgba(outline,'#000000') if outline else None)
         shadow=Image.new('RGBA',layer.size,(0,0,0,0));shadow.alpha_composite(layer,(3,3));shadow.putalpha(shadow.getchannel('A').point(lambda a:a//3));rotated=Image.alpha_composite(shadow,layer).rotate(-float(label.get('rotation',0)),resample=Image.Resampling.BICUBIC,expand=True)
-        if anim=='Pop':
-            scale=max(.05,.3+.7*progress);rotated=rotated.resize((max(1,int(rotated.width*scale)),max(1,int(rotated.height*scale))),Image.Resampling.LANCZOS)
-        x=int(label['x']*image.width-rotated.width/2);y=int(label['y']*image.height-rotated.height/2)
+        if anim in ('Pop','Pulse'):
+            scale=max(.05,.3+.7*progress) if anim=='Pop' else max(.05,progress);rotated=rotated.resize((max(1,int(rotated.width*scale)),max(1,int(rotated.height*scale))),Image.Resampling.LANCZOS)
+        if extra_rotation:rotated=rotated.rotate(-extra_rotation,resample=Image.Resampling.BICUBIC,expand=True)
+        x=int(label['x']*image.width-rotated.width/2+offset_x);y=int(label['y']*image.height-rotated.height/2+offset_y)
         if anim=='Slide left':x-=int((1.0-progress)*image.width)
         elif anim=='Slide right':x+=int((1.0-progress)*image.width)
         image.paste(rotated,(x,y),rotated)
