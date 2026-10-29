@@ -61,18 +61,15 @@ class ExportStreamTests(unittest.TestCase):
         process = _Process()
         with tempfile.TemporaryDirectory() as directory:
             target = str(Path(directory) / "animation.mp4")
-            with patch.object(app.filedialog, "asksaveasfilename", return_value=target), \
-                 patch.object(app.shutil, "which", return_value="ffmpeg"), \
-                 patch.object(app, "FFMPEG", Path("missing-ffmpeg.exe")), \
-                 patch.object(app.subprocess, "Popen", return_value=process) as popen:
-                self.app.export_mp4()
+            with patch.object(app.subprocess, "Popen", return_value=process) as popen:
+                self.app._export_video("ffmpeg", target, 1, self.app.frames, None)
 
         command = popen.call_args.args[0]
         self.assertIn("rawvideo", command)
         self.assertIn("rgb24", command)
         self.assertNotIn("%05d.png", command)
         self.assertEqual(process.stdin.writes, [b"\xff\x00\x00" * 8])
-        self.assertIn("exported", self.app.status.get())
+        self.assertEqual(self.app._export_result, (target, ""))
 
 
 if __name__ == "__main__":

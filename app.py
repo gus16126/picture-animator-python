@@ -1,4 +1,5 @@
 ﻿import base64, io, json, os, shutil, subprocess, tempfile, zipfile
+import threading
 from pathlib import Path
 import re
 import math
@@ -23,7 +24,7 @@ class Animator(tk.Tk):
         super().__init__(); self.title(APP); self.geometry("1280x800"); self.minsize(950,650)
         self.frames=[]; self.current=-1; self.selected=None; self.project_path=None; self.audio_path=None; self.tkimg=None; self.scale=1; self.drag=None; self._img_cache={}
         self.presets=self.load_presets()
-        self.playing=False;self.play_started=0;self.play_origin=0;self.timeline_active=False
+        self.playing=False;self.play_started=0;self.play_origin=0;self.timeline_active=False;self._exporting=False;self._export_progress="";self._export_result=None
         self._ui(); self.bind("<Control-s>", lambda e:self.save())
     def _ui(self):
         top=ttk.Frame(self,padding=8); top.pack(fill="x")
@@ -412,37 +413,53 @@ class Animator(tk.Tk):
         elif anim=='Slide right':x+=int((1.0-progress)*image.width)
         image.paste(rotated,(x,y),rotated)
     def export_mp4(self):
+        if self._exporting:
+            self.status.set("An export is already in progress.");return
         if not self.frames:return
         target=filedialog.asksaveasfilename(defaultextension='.mp4',filetypes=[("MP4 video","*.mp4"),("WebM video","*.webm"),("Animated GIF","*.gif")])
         if not target:return
         ff=FFMPEG if FFMPEG.exists() else shutil.which('ffmpeg')
         if not ff:return messagebox.showerror(APP,'FFmpeg was not found.')
+        rate=max(.1,float(self.fps.get()));frames=json.loads(json.dumps(self.frames));audio_path=Path(self.audio_path) if self.audio_path else None
+        self._exporting=True;self._export_progress="Preparing export...";self._export_result=None;self.status.set(self._export_progress)
+        threading.Thread(target=self._export_video,args=(str(ff),target,rate,frames,audio_path),daemon=True).start()
+        self.after(100,self._poll_export)
+
+    def _poll_export(self):
+        if self._export_result is None:
+            self.status.set(self._export_progress);self.after(100,self._poll_export);return
+        target,error=self._export_result;self._exporting=False
+        if error:messagebox.showerror(APP,f"MP4 export failed:\n{error[-3000:]}")
+        else:self.status.set(f"Exported: {Path(target).name}")
+
+    def _export_video(self, ff, target, rate, frames, audio_path):
         try:
-            rate=max(.1,float(self.fps.get()));images=[self.frame_image(f) for f in self.frames]
+            renderer=Animator.__new__(Animator);renderer.frames=frames;renderer._img_cache={}
+            images=[renderer.frame_image(f) for f in frames]
             width=max(im.width for im in images);height=max(im.height for im in images);width+=width%2;height+=height%2
-            total_steps=sum(max(1,math.ceil(self.frame_duration(f)*rate)) for f in self.frames)
-            command=[str(ff),'-y','-loglevel','error','-f','rawvideo','-pix_fmt','rgb24','-s:v',f'{width}x{height}','-framerate',str(rate),'-i','-']
-            if self.audio_path and self.audio_path.exists():command += ['-stream_loop','-1','-i',str(self.audio_path),'-shortest','-c:a','aac']
+            total_steps=sum(max(1,math.ceil(renderer.frame_duration(f)*rate)) for f in frames)
+            command=[ff,'-y','-loglevel','error','-f','rawvideo','-pix_fmt','rgb24','-s:v',f'{width}x{height}','-framerate',str(rate),'-i','-']
+            if audio_path and audio_path.exists():command += ['-stream_loop','-1','-i',str(audio_path),'-shortest','-c:a','aac']
             suffix=Path(target).suffix.lower()
             if suffix=='.gif':command += ['-vf','fps='+str(rate)+',scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos',target]
             elif suffix=='.webm':command += ['-c:v','libvpx-vp9','-crf','32','-b:v','0',target]
-            else:command += ['-c:v','libx264','-pix_fmt','yuv420p','-movflags','+faststart',target]
+            else:command += ['-c:v','libx264','-preset','veryfast','-pix_fmt','yuv420p','-movflags','+faststart',target]
             process=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
             output_index=0
             try:
-                for index,f in enumerate(self.frames):
-                    steps=max(1,math.ceil(self.frame_duration(f)*rate))
+                for index,f in enumerate(frames):
+                    steps=max(1,math.ceil(renderer.frame_duration(f)*rate))
                     for step in range(steps):
-                        im=self.transition_image(index,step/rate)
+                        im=renderer.transition_image(index,step/rate)
                         canvas=Image.new('RGB',(width,height),'black');canvas.paste(im,((width-im.width)//2,(height-im.height)//2))
                         process.stdin.write(canvas.tobytes());output_index+=1
                         if output_index==total_steps or output_index%max(1,int(rate))==0:
-                            self.status.set(f"Exporting: {output_index}/{total_steps} frames ({output_index*100//total_steps}%)");self.update_idletasks()
+                            self._export_progress=f"Exporting: {output_index}/{total_steps} frames ({output_index*100//total_steps}%)"
                 process.stdin.close();result=process.wait();detail=process.stderr.read().decode(errors='replace').strip()
                 if result:raise RuntimeError(detail or f'FFmpeg exited with code {result}.')
             finally:
                 if process.stdin and not process.stdin.closed:process.stdin.close()
                 if process.poll() is None:process.terminate()
-            self.status.set(f"MP4 exported: {Path(target).name}")
-        except Exception as e:messagebox.showerror(APP,f"MP4 export failed:\n{e}")
+            self._export_result=(target,"")
+        except Exception as e:self._export_result=(target,str(e))
 if __name__=='__main__':Animator().mainloop()
