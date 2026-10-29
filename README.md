@@ -4,7 +4,7 @@ A local desktop app for creating picture-by-picture animations with editable tit
 
 ## Run
 
-First run: the launcher installs Pillow automatically (or run `pip install -r requirements.txt` yourself). Exporting video also needs FFmpeg installed.
+First run: install the dependency once with `pip install -r requirements.txt` (Pillow). Exporting video also needs FFmpeg installed.
 
 Double-click `Start Picture Animator.bat`, or run:
 
