@@ -50,7 +50,7 @@ class Animator(tk.Tk):
         ttk.Button(right,text="Delete label",command=self.delete_label).pack(fill="x",pady=4)
         self.preset_choice=tk.StringVar();self.preset_input=ttk.Combobox(right,values=sorted(self.presets),textvariable=self.preset_choice,state="readonly");self.preset_input.pack(fill="x",pady=(8,0));ttk.Button(right,text="Save preset",command=self.save_preset).pack(fill="x",pady=(4,0));ttk.Button(right,text="Apply preset",command=self.apply_preset_to_matching).pack(fill="x",pady=4)
         self.fields={}
-        for key,title in [("text","Text"),("shape","Shape"),("font","Font"),("size","Text size"),("color","Text color"),("bg","Background"),("outline","Outline"),("opacity","Opacity"),("rotation","Rotation"),("delay","Appear after (s)"),("animation","Animation"),("anim_duration","Animation time (s)")]:
+        for key,title in [("text","Text"),("shape","Shape"),("animation","Animation"),("anim_duration","Animation time (s)"),("font","Font"),("size","Text size"),("color","Text color"),("bg","Background"),("outline","Outline"),("opacity","Opacity"),("rotation","Rotation"),("delay","Appear after (s)")]:
             ttk.Label(right,text=title).pack(anchor="w",pady=(7,0))
             if key=="shape": w=ttk.Combobox(right,values=SHAPES,state="readonly")
             elif key=="font": w=ttk.Combobox(right,values=FONTS,state="readonly")
