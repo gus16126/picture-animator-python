@@ -79,7 +79,7 @@ class Animator(tk.Tk):
             with Image.open(io.BytesIO(base64.b64decode(key))) as image:
                 im=ImageOps.exif_transpose(image).convert("RGB")
             self._img_cache[key]=im
-        return im
+        return im.copy()
     def frame_duration(self, frame):
         try:return max(.1,float(frame.get('duration',1.0)))
         except (TypeError,ValueError):return 1.0
