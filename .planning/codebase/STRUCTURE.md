@@ -1,3 +1,7 @@
+---
+last_mapped_commit: bbe01a858d8cbb205b0f6f1647b34f72102e31f0
+last_mapped_at: 2026-10-29
+---
 # Codebase Structure
 
 **Analysis Date:** 2026-10-29

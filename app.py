@@ -19,13 +19,15 @@ FONTS = ("Arial Bold", "Segoe UI Bold", "Calibri Bold")
 PRESETS_FILE = Path(__file__).with_name("label_presets.json")
 STYLE_KEYS = ("shape", "font", "size", "color", "bg", "outline", "opacity", "rotation")
 
+def _arrow_tip(w, h): return min(ARROW_TIP, max(12, min(w*.4, h*.9)))
+
 class Animator(tk.Tk):
     def __init__(self):
         super().__init__(); self.title(APP); self.geometry("1280x800"); self.minsize(950,650)
         self.frames=[]; self.current=-1; self.selected=None; self.project_path=None; self.audio_path=None; self.tkimg=None; self.scale=1; self.drag=None; self._img_cache={}
         self.presets=self.load_presets()
-        self.playing=False;self.play_started=0;self.play_origin=0;self.timeline_active=False;self._exporting=False;self._export_progress="";self._export_result=None
-        self._ui(); self.bind("<Control-s>", lambda e:self.save())
+        self.playing=False;self.play_started=0;self.play_origin=0;self.timeline_active=False;self._exporting=False;self._export_progress="";self._export_result=None;self._export_process=None;self._draw_job=None
+        self._ui(); self.bind("<Control-s>", lambda e:self.save()); self.protocol("WM_DELETE_WINDOW", self._on_close)
     def _ui(self):
         top=ttk.Frame(self,padding=8); top.pack(fill="x")
         for text,cmd in [("New",self.new),("Add pictures",self.add_pictures),("Open project",self.open_project),("Save",self.save),("Save as",self.save_as),("Export MP4",self.export_mp4)]: ttk.Button(top,text=text,command=cmd).pack(side="left",padx=3)
@@ -59,17 +61,17 @@ class Animator(tk.Tk):
         label_actions.pack(fill="x")
         label_menu=tk.Menu(label_actions,tearoff=0)
         label_menu.add_command(label="Add label",command=self.add_label)
-        label_menu.add_command(label="Delete selected label",command=self.delete_label)
-        label_menu.configure(postcommand=lambda:label_menu.entryconfigure(1,state="normal" if self.label() else "disabled"))
+        label_del_index=label_menu.add_command(label="Delete selected label",command=self.delete_label)
+        label_menu.configure(postcommand=lambda:label_menu.entryconfigure(label_del_index,state="normal" if self.label() else "disabled"))
         label_actions.configure(menu=label_menu)
         self.preset_choice=tk.StringVar();self.preset_input=ttk.Combobox(label_panel,values=sorted(self.presets),textvariable=self.preset_choice,state="readonly");self.preset_input.pack(fill="x",pady=(8,0))
         preset_actions=ttk.Menubutton(label_panel,text="Preset actions ▾")
         preset_actions.pack(fill="x",pady=4)
         preset_menu=tk.Menu(preset_actions,tearoff=0)
         preset_menu.add_command(label="Save label style as preset",command=self.save_preset)
-        preset_menu.add_command(label="Apply preset (keep shapes)",command=self.apply_preset_to_matching)
-        preset_menu.add_command(label="Apply preset including shapes",command=lambda:self.apply_preset_to_matching(include_shape=True))
-        preset_menu.configure(postcommand=lambda:[preset_menu.entryconfigure(i,state="normal" if self.label() and self.presets.get(self.preset_choice.get()) else "disabled") for i in (1,2)])
+        preset_keep_index=preset_menu.add_command(label="Apply preset (keep shapes)",command=self.apply_preset_to_matching)
+        preset_shape_index=preset_menu.add_command(label="Apply preset including shapes",command=lambda:self.apply_preset_to_matching(include_shape=True))
+        preset_menu.configure(postcommand=lambda:[preset_menu.entryconfigure(i,state="normal" if self.label() and self.presets.get(self.preset_choice.get()) else "disabled") for i in (preset_keep_index,preset_shape_index)])
         preset_actions.configure(menu=preset_menu)
         self.fields={}
         for key,title in [("text","Text"),("shape","Shape"),("animation","Animation"),("anim_duration","Animation time (s)"),("font","Font"),("size","Text size"),("color","Text color"),("bg","Background color"),("outline","Outline color"),("opacity","Opacity"),("rotation","Rotation"),("delay","Appear after (s)")]:
@@ -183,7 +185,7 @@ class Animator(tk.Tk):
         if source<0 or target==source or not (0<=target<len(self.frames)):return
         frame=self.frames.pop(source);self.frames.insert(target,frame);self.current=target;self.frame_drag_index=target;self.refresh();self.status.set('Reordered frame.')
     def delete_frame(self):
-        if self.current>=0:self.stop_playback();self.frames.pop(self.current);self.current=min(self.current,len(self.frames)-1);self.selected=None;self.refresh()
+        if self.current>=0:self.stop_playback();self.frames.pop(self.current);self.current=min(self.current,len(self.frames)-1);self.selected=None;self._prune_img_cache();self.refresh()
     def duplicate_frame(self):
         if self.current<0:return
         duplicate=json.loads(json.dumps(self.frames[self.current]));duplicate['name']=f"{duplicate.get('name','Frame')} copy"
@@ -261,7 +263,7 @@ class Animator(tk.Tk):
         elif key=='anim_duration':
             try:l[key]=max(.1,float(value or .5))
             except ValueError:return
-        self.draw()
+        self._schedule_draw()
     def render_timeline(self):
         if not self.frames:return
         total=self.total_duration();position=min(max(0,self.timeline.get()),total);self.timeline.set(position)
@@ -336,7 +338,7 @@ class Animator(tk.Tk):
         except (OSError, ValueError, UnidentifiedImageError) as e:self.status.set(f"Could not display this picture: {e}");return
         cw,ch=self.canvas.winfo_width(),self.canvas.winfo_height();self.scale=min(max(1,cw)/im.width,max(1,ch)/im.height);w,h=int(im.width*self.scale),int(im.height*self.scale);x,y=(cw-w)//2,(ch-h)//2;self.origin=(x,y,w,h);self.tkimg=ImageTk.PhotoImage(im.resize((w,h),Image.Resampling.LANCZOS));self.canvas.create_image(x,y,anchor="nw",image=self.tkimg)
     def shape(self,s,x,y,w,h):
-        a=w/2;b=h/2;tip=min(ARROW_TIP,max(12,min(w*.4,h*.9)))
+        a=w/2;b=h/2;tip=_arrow_tip(w,h)
         if s=='Right arrow':return [x-a,y-b,x+a-tip,y-b,x+a,y,x+a-tip,y+b,x-a,y+b]
         if s=='Left arrow':return [x-a+tip,y-b,x+a,y-b,x+a,y+b,x-a+tip,y+b,x-a,y]
         if s=='Up arrow':return [x,y-b,x+a,y-b+tip,x+a,y+b,x-a,y+b,x-a,y-b+tip]
@@ -347,7 +349,7 @@ class Animator(tk.Tk):
         self.stop_playback();self.timeline_active=False
         self.draw();x,y,w,h=self.origin
         for label in reversed(self.frames[self.current]['labels']):
-            tw,th=self._label_box(label);tw*=self.scale;th*=self.scale;px=x+label['x']*w;py=y+label['y']*h
+            tw,th=self._label_box(label);tw*=self.scale;th*=self.scale;px=x+label.get('x',.5)*w;py=y+label.get('y',.5)*h
             if px-tw/2<=e.x<=px+tw/2 and py-th/2<=e.y<=py+th/2:self.selected=label['id'];self.drag=(e.x,e.y);self.draw();self.load_fields();return
         self.selected=None;self.draw();self.load_fields()
     def motion(self,e):
@@ -363,6 +365,22 @@ class Animator(tk.Tk):
         menu.add_command(label="Delete label",command=self.delete_label,state="normal" if self.selected else "disabled")
         try:menu.tk_popup(event.x_root,event.y_root)
         finally:menu.grab_release()
+    def _schedule_draw(self):
+        job=getattr(self,'_draw_job',None)
+        if job is not None:
+            try:self.after_cancel(job)
+            except Exception:pass
+        self._draw_job=self.after(120,self._do_draw)
+    def _do_draw(self):
+        self._draw_job=None;self.draw()
+    def _prune_img_cache(self):
+        keep={f['image'] for f in self.frames}
+        self._img_cache={k:v for k,v in self._img_cache.items() if k in keep}
+    def _on_close(self):
+        if self._exporting and self._export_process is not None:
+            try:self._export_process.terminate()
+            except Exception:pass
+        self.destroy()
     def save_data(self,path):
         temp=Path(str(path)+'.tmp')
         try:
@@ -394,10 +412,10 @@ class Animator(tk.Tk):
         for path in (paths.get(family), 'C:/Windows/Fonts/arialbd.ttf','C:/Windows/Fonts/segoeuib.ttf'):
             if Path(path).exists():return ImageFont.truetype(path,size)
         return ImageFont.load_default()
-    def _line_spacing(self, label): return max(4, int(label['size'])//4)
+    def _line_spacing(self, label): return max(4, int(label.get('size',28))//4)
     def _text_measure(self, label):
-        font=self.font_for_export(label['size'],label.get('font','Arial Bold'));spacing=self._line_spacing(label)
-        box=ImageDraw.Draw(Image.new('RGBA',(1,1))).multiline_textbbox((0,0),label['text'],font=font,anchor='mm',align='center',spacing=spacing)
+        font=self.font_for_export(label.get('size',28),label.get('font','Arial Bold'));spacing=self._line_spacing(label)
+        box=ImageDraw.Draw(Image.new('RGBA',(1,1))).multiline_textbbox((0,0),label.get('text',''),font=font,anchor='mm',align='center',spacing=spacing)
         return int(box[2]-box[0]),int(box[3]-box[1])
     def _label_box(self, label):
         bw,bh=self._text_measure(label)
@@ -407,25 +425,26 @@ class Animator(tk.Tk):
         if label.get('shape') in ('Up arrow','Down arrow'):height+=ARROW_TIP
         return width,height
     def draw_export_label(self, image, label, progress=1.0, alpha=1.0, offset_x=0, offset_y=0, extra_rotation=0):
-        anim=label.get('animation','None');font=self.font_for_export(label['size'],label.get('font','Arial Bold'));spacing=self._line_spacing(label);w,h=self._label_box(label);opacity=int(max(0,min(100,label.get('opacity',100)))*2.55*alpha)
+        anim=label.get('animation','None');shape=label.get('shape','Box');text=label.get('text','')
+        font=self.font_for_export(label.get('size',28),label.get('font','Arial Bold'));spacing=self._line_spacing(label);w,h=self._label_box(label);opacity=int(max(0,min(100,label.get('opacity',100)))*2.55*alpha)
         if opacity<=0:return
         layer=Image.new('RGBA',(w+40,h+40),(0,0,0,0));draw=ImageDraw.Draw(layer);cx,cy=layer.width//2,layer.height//2
         def rgba(color,fallback):
             try:return ImageColor.getrgb(color)+(opacity,)
             except (ValueError,TypeError):return ImageColor.getrgb(fallback)+(opacity,)
-        outline=label.get('outline','');draw.polygon(self.shape(label['shape'],cx,cy,w,h),fill=rgba(label['bg'],'#5B46C8'),outline=rgba(outline,'#000000') if outline else None,width=2)
-        shown=label['text'][:max(1,int(len(label['text'])*progress))] if anim=='Typewriter' else label['text']
-        tx,ty=cx,cy
-        if label['shape']=='Right arrow':tx=cx-ARROW_TIP/2
-        elif label['shape']=='Left arrow':tx=cx+ARROW_TIP/2
-        elif label['shape']=='Up arrow':ty=cy+ARROW_TIP/2
-        elif label['shape']=='Down arrow':ty=cy-ARROW_TIP/2
-        draw.multiline_text((tx,ty),shown,font=font,fill=rgba(label['color'],'#FFFFFF'),anchor='mm',align='center',spacing=spacing,stroke_width=1 if outline else 0,stroke_fill=rgba(outline,'#000000') if outline else None)
+        outline=label.get('outline','');draw.polygon(self.shape(shape,cx,cy,w,h),fill=rgba(label.get('bg','#5B46C8'),'#5B46C8'),outline=rgba(outline,'#000000') if outline else None,width=2)
+        shown=text[:max(1,int(len(text)*progress))] if anim=='Typewriter' else text
+        tx,ty=cx,cy;tip=_arrow_tip(w,h)
+        if shape=='Right arrow':tx=cx-tip/2
+        elif shape=='Left arrow':tx=cx+tip/2
+        elif shape=='Up arrow':ty=cy+tip/2
+        elif shape=='Down arrow':ty=cy-tip/2
+        draw.multiline_text((tx,ty),shown,font=font,fill=rgba(label.get('color','#FFFFFF'),'#FFFFFF'),anchor='mm',align='center',spacing=spacing,stroke_width=1 if outline else 0,stroke_fill=rgba(outline,'#000000') if outline else None)
         shadow=Image.new('RGBA',layer.size,(0,0,0,0));shadow.alpha_composite(layer,(3,3));shadow.putalpha(shadow.getchannel('A').point(lambda a:a//3));rotated=Image.alpha_composite(shadow,layer).rotate(-float(label.get('rotation',0)),resample=Image.Resampling.BICUBIC,expand=True)
         if anim in ('Pop','Pulse'):
             scale=max(.05,.3+.7*progress) if anim=='Pop' else max(.05,progress);rotated=rotated.resize((max(1,int(rotated.width*scale)),max(1,int(rotated.height*scale))),Image.Resampling.LANCZOS)
         if extra_rotation:rotated=rotated.rotate(-extra_rotation,resample=Image.Resampling.BICUBIC,expand=True)
-        x=int(label['x']*image.width-rotated.width/2+offset_x);y=int(label['y']*image.height-rotated.height/2+offset_y)
+        x=int(label.get('x',.5)*image.width-rotated.width/2+offset_x);y=int(label.get('y',.5)*image.height-rotated.height/2+offset_y)
         if anim=='Slide left':x-=int((1.0-progress)*image.width)
         elif anim=='Slide right':x+=int((1.0-progress)*image.width)
         image.paste(rotated,(x,y),rotated)
@@ -450,33 +469,53 @@ class Animator(tk.Tk):
         else:self.status.set(f"Exported: {Path(target).name}")
 
     def _export_video(self, ff, target, rate, frames, audio_path):
+        process=None;drainer=None;stderr_parts=[]
         try:
             renderer=Animator.__new__(Animator);renderer.frames=frames;renderer._img_cache={}
             images=[renderer.frame_image(f) for f in frames]
             width=max(im.width for im in images);height=max(im.height for im in images);width+=width%2;height+=height%2
             total_steps=sum(max(1,math.ceil(renderer.frame_duration(f)*rate)) for f in frames)
             command=[ff,'-y','-loglevel','error','-f','rawvideo','-pix_fmt','rgb24','-s:v',f'{width}x{height}','-framerate',str(rate),'-i','-']
-            if audio_path and audio_path.exists():command += ['-stream_loop','-1','-i',str(audio_path),'-shortest','-c:a','aac']
+            if audio_path and audio_path.exists():command += ['-stream_loop','-1','-i',str(audio_path),'-c:a','aac']
             suffix=Path(target).suffix.lower()
-            if suffix=='.gif':command += ['-vf','fps='+str(rate)+',scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos',target]
-            elif suffix=='.webm':command += ['-c:v','libvpx-vp9','-crf','32','-b:v','0',target]
-            else:command += ['-c:v','libx264','-preset','veryfast','-pix_fmt','yuv420p','-movflags','+faststart',target]
-            process=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            if suffix=='.gif':command += ['-vf','fps='+str(rate)+',scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos']
+            elif suffix=='.webm':command += ['-c:v','libvpx-vp9','-crf','32','-b:v','0']
+            else:command += ['-c:v','libx264','-preset','veryfast','-pix_fmt','yuv420p','-movflags','+faststart']
+            command += ['-t',f'{total_steps/rate:.6f}',target]
+            process=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE);self._export_process=process
+            def _drain():
+                try:
+                    while True:
+                        chunk=process.stderr.read(65536)
+                        if not chunk:break
+                        stderr_parts.append(chunk)
+                except Exception:pass
+            drainer=threading.Thread(target=_drain,daemon=True);drainer.start()
             output_index=0
-            try:
-                for index,f in enumerate(frames):
-                    steps=max(1,math.ceil(renderer.frame_duration(f)*rate))
-                    for step in range(steps):
-                        im=renderer.transition_image(index,step/rate)
-                        canvas=Image.new('RGB',(width,height),'black');canvas.paste(im,((width-im.width)//2,(height-im.height)//2))
-                        process.stdin.write(canvas.tobytes());output_index+=1
-                        if output_index==total_steps or output_index%max(1,int(rate))==0:
-                            self._export_progress=f"Exporting: {output_index}/{total_steps} frames ({output_index*100//total_steps}%)"
-                process.stdin.close();result=process.wait();detail=process.stderr.read().decode(errors='replace').strip()
-                if result:raise RuntimeError(detail or f'FFmpeg exited with code {result}.')
-            finally:
-                if process.stdin and not process.stdin.closed:process.stdin.close()
-                if process.poll() is None:process.terminate()
+            for index,f in enumerate(frames):
+                steps=max(1,math.ceil(renderer.frame_duration(f)*rate))
+                for step in range(steps):
+                    im=renderer.transition_image(index,step/rate)
+                    canvas=Image.new('RGB',(width,height),'black');canvas.paste(im,((width-im.width)//2,(height-im.height)//2))
+                    process.stdin.write(canvas.tobytes());output_index+=1
+                    if output_index==total_steps or output_index%max(1,int(rate))==0:
+                        self._export_progress=f"Exporting: {output_index}/{total_steps} frames ({output_index*100//total_steps}%)"
+            process.stdin.close()
+            result=process.wait();drainer.join(timeout=10)
+            detail=b''.join(stderr_parts).decode(errors='replace').strip()
+            if result:raise RuntimeError(detail or f'FFmpeg exited with code {result}.')
             self._export_result=(target,"")
-        except Exception as e:self._export_result=(target,str(e))
+        except Exception as e:
+            if drainer is not None:drainer.join(timeout=2)
+            detail=b''.join(stderr_parts).decode(errors='replace').strip()
+            self._export_result=(target,detail or str(e))
+        finally:
+            if process is not None:
+                if process.stdin and not process.stdin.closed:
+                    try:process.stdin.close()
+                    except Exception:pass
+                if process.poll() is None:
+                    try:process.terminate()
+                    except Exception:pass
+            self._export_process=None
 if __name__=='__main__':Animator().mainloop()

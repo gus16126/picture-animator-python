@@ -1,0 +1,62 @@
+{
+  "upper-arrow": {
+    "shape": "Up arrow",
+    "font": "Arial Bold",
+    "size": 100,
+    "color": "#FFFFFF",
+    "bg": "#5B46C8",
+    "outline": "",
+    "opacity": 100,
+    "rotation": 0.0
+  },
+  "conclusion": {
+    "shape": "Box",
+    "font": "Arial Bold",
+    "size": 250,
+    "color": "#FFFFFF",
+    "bg": "#5B46C8",
+    "outline": "",
+    "opacity": 100,
+    "rotation": 0.0
+  },
+  "step": {
+    "shape": "Box",
+    "font": "Arial Bold",
+    "size": 100,
+    "color": "#FFFFFF",
+    "bg": "#5B46C8",
+    "outline": "",
+    "opacity": 100,
+    "rotation": 0.0
+  },
+  "created by": {
+    "shape": "Box",
+    "font": "Arial Bold",
+    "size": 70,
+    "color": "#FFFFFF",
+    "bg": "#5B46C8",
+    "outline": "",
+    "opacity": 100,
+    "rotation": 0.0
+  },
+  "marker light": {
+    "shape": "Down arrow",
+    "font": "Arial Bold",
+    "size": 100,
+    "color": "#FFFFFF",
+    "bg": "#5B46C8",
+    "outline": "",
+    "opacity": 100,
+    "rotation": 0.0
+  },
+  "Title": {
+    "shape": "Box",
+    "font": "Arial Bold",
+    "size": 100,
+    "color": "#FFFFFF",
+    "bg": "#5B46C8",
+    "outline": "",
+    "opacity": 100,
+    "rotation": 0.0
+  }
+}
