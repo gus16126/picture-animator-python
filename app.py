@@ -1,4 +1,4 @@
-﻿import base64, io, json, os, shutil, subprocess, tempfile, zipfile
+﻿import base64, copy, io, json, os, shutil, subprocess, tempfile, zipfile
 import threading
 from pathlib import Path
 import re
@@ -17,20 +17,28 @@ LABEL_PAD = 24
 ARROW_TIP = 48
 FONTS = ("Arial Bold", "Segoe UI Bold", "Calibri Bold")
 PRESETS_FILE = Path(__file__).with_name("label_presets.json")
-STYLE_KEYS = ("shape", "font", "size", "color", "bg", "outline", "opacity", "rotation")
+STYLE_KEYS = ("shape", "font", "size", "color", "bg", "outline", "opacity", "rotation", "animation", "anim_duration", "delay")
 
 def _arrow_tip(w, h): return min(ARROW_TIP, max(12, min(w*.4, h*.9)))
+
+LOG_FILE = Path(__file__).with_name("app.log")
+
+def _log(msg):
+    try:
+        with open(LOG_FILE,'a',encoding='utf-8') as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {msg}\n")
+    except Exception:pass
 
 class Animator(tk.Tk):
     def __init__(self):
         super().__init__(); self.title(APP); self.geometry("1280x800"); self.minsize(950,650)
         self.frames=[]; self.current=-1; self.selected=None; self.project_path=None; self.audio_path=None; self.tkimg=None; self.scale=1; self.drag=None; self._img_cache={}
         self.presets=self.load_presets()
-        self.playing=False;self.play_started=0;self.play_origin=0;self.timeline_active=False;self._exporting=False;self._export_progress="";self._export_result=None;self._export_process=None;self._draw_job=None
-        self._ui(); self.bind("<Control-s>", lambda e:self.save()); self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.playing=False;self.play_started=0;self.play_origin=0;self.timeline_active=False;self._exporting=False;self._export_progress="";self._export_result=None;self._export_process=None;self._draw_job=None;self._undo_stack=[]
+        self._ui(); self.bind("<Control-s>", lambda e:self.save()); self.bind("<Control-z>", lambda e:self.undo()); self.protocol("WM_DELETE_WINDOW", self._on_close)
     def _ui(self):
         top=ttk.Frame(self,padding=8); top.pack(fill="x")
-        for text,cmd in [("New",self.new),("Add pictures",self.add_pictures),("Open project",self.open_project),("Save",self.save),("Save as",self.save_as),("Export MP4",self.export_mp4)]: ttk.Button(top,text=text,command=cmd).pack(side="left",padx=3)
+        for text,cmd in [("New",self.new),("Add pictures",self.add_pictures),("Open project",self.open_project),("Save",self.save),("Save as",self.save_as),("Undo",self.undo),("Export MP4",self.export_mp4)]: ttk.Button(top,text=text,command=cmd).pack(side="left",padx=3)
         ttk.Button(top,text="Add audio",command=self.add_audio).pack(side="left",padx=3)
         ttk.Label(top,text="  Projects are saved as .paanim files, including their pictures.").pack(side="left")
         body=ttk.PanedWindow(self,orient="horizontal"); body.pack(fill="both",expand=True,padx=8,pady=(0,8))
@@ -71,7 +79,8 @@ class Animator(tk.Tk):
         preset_menu.add_command(label="Save label style as preset",command=self.save_preset)
         preset_keep_index=preset_menu.add_command(label="Apply preset (keep shapes)",command=self.apply_preset_to_matching)
         preset_shape_index=preset_menu.add_command(label="Apply preset including shapes",command=lambda:self.apply_preset_to_matching(include_shape=True))
-        preset_menu.configure(postcommand=lambda:[preset_menu.entryconfigure(i,state="normal" if self.label() and self.presets.get(self.preset_choice.get()) else "disabled") for i in (preset_keep_index,preset_shape_index)])
+        preset_all_index=preset_menu.add_command(label="Apply preset to ALL labels",command=lambda:self.apply_preset_to_matching(include_shape=True,all_labels=True))
+        preset_menu.configure(postcommand=lambda:[preset_menu.entryconfigure(i,state="normal" if self.label() and self.presets.get(self.preset_choice.get()) else "disabled") for i in (preset_keep_index,preset_shape_index,preset_all_index)])
         preset_actions.configure(menu=preset_menu)
         self.fields={}
         for key,title in [("text","Text"),("shape","Shape"),("animation","Animation"),("anim_duration","Animation time (s)"),("font","Font"),("size","Text size"),("color","Text color"),("bg","Background color"),("outline","Outline color"),("opacity","Opacity"),("rotation","Rotation"),("delay","Appear after (s)")]:
@@ -86,7 +95,7 @@ class Animator(tk.Tk):
                 color_row.pack(fill="x")
             else:w=ttk.Entry(label_panel)
             if key not in ('color','bg','outline'):w.pack(fill="x")
-            w.bind("<KeyRelease>",lambda e,key=key:self.apply_field(key));w.bind("<<ComboboxSelected>>",lambda e,key=key:self.apply_field(key));self.fields[key]=w
+            w.bind("<KeyRelease>",lambda e,key=key:self.apply_field(key));w.bind("<<ComboboxSelected>>",lambda e,key=key:self.apply_field(key));w.bind("<FocusIn>",lambda e:self._snapshot());self.fields[key]=w
         self.status=tk.StringVar(value="Add pictures to begin.");ttk.Label(self,textvariable=self.status,anchor="w",padding=6).pack(fill="x")
     def new(self): self.stop_playback();self.frames=[];self.current=-1;self.selected=None;self.project_path=None;self.audio_path=None;self._img_cache={};self.refresh()
     def add_audio(self):
@@ -94,6 +103,7 @@ class Animator(tk.Tk):
         if name:self.audio_path=Path(name);self.status.set(f"Audio: {self.audio_path.name}")
     def add_pictures(self):
         files=filedialog.askopenfilenames(filetypes=[("Pictures","*.png *.jpg *.jpeg *.webp *.bmp")])
+        if files:self._snapshot()
         rejected=[];first_new=len(self.frames)
         for f in files:
             try:
@@ -159,6 +169,7 @@ class Animator(tk.Tk):
     def apply_timing_to_selected(self):
         frames=self.selected_frames()
         if not frames:return
+        self._snapshot()
         try:duration=max(.1,float(self.duration.get()));transition_duration=max(.1,float(self.transition_duration_value.get()))
         except ValueError:return
         for frame in frames:frame['duration']=duration;frame['transition']=self.transition.get();frame['transition_duration']=transition_duration
@@ -175,19 +186,21 @@ class Animator(tk.Tk):
             self.stop_playback();self.current=x[0];self.selected=None;self.timeline_active=False;self.draw();self.load_fields();self.load_duration();self.load_transition()
     def rename_frame(self,e=None):
         if self.current<0:return
-        box=tk.Toplevel(self);box.title("Rename frame");v=tk.StringVar(value=self.frames[self.current]['name']);ttk.Entry(box,textvariable=v,width=35).pack(padx=10,pady=10);ttk.Button(box,text="Save",command=lambda:(self.frames[self.current].update(name=v.get().strip() or 'Untitled frame'),box.destroy(),self.refresh())).pack(pady=(0,10))
+        box=tk.Toplevel(self);box.title("Rename frame");v=tk.StringVar(value=self.frames[self.current]['name']);ttk.Entry(box,textvariable=v,width=35).pack(padx=10,pady=10);ttk.Button(box,text="Save",command=lambda:(self._snapshot(),self.frames[self.current].update(name=v.get().strip() or 'Untitled frame'),box.destroy(),self.refresh())).pack(pady=(0,10))
     def move(self,d):
         n=self.current+d
-        if 0<=n<len(self.frames):self.frames[self.current],self.frames[n]=self.frames[n],self.frames[self.current];self.current=n;self.refresh()
-    def frame_drag_start(self,event): self.frame_drag_index=self.listbox.nearest(event.y)
+        if 0<=n<len(self.frames):self._snapshot();self.frames[self.current],self.frames[n]=self.frames[n],self.frames[self.current];self.current=n;self.refresh()
+    def frame_drag_start(self,event): self.frame_drag_index=self.listbox.nearest(event.y);self._drag_snapped=False
     def frame_drag_move(self,event):
         target=self.listbox.nearest(event.y);source=getattr(self,'frame_drag_index',-1)
         if source<0 or target==source or not (0<=target<len(self.frames)):return
+        if not getattr(self,'_drag_snapped',False):self._snapshot();self._drag_snapped=True
         frame=self.frames.pop(source);self.frames.insert(target,frame);self.current=target;self.frame_drag_index=target;self.refresh();self.status.set('Reordered frame.')
     def delete_frame(self):
-        if self.current>=0:self.stop_playback();self.frames.pop(self.current);self.current=min(self.current,len(self.frames)-1);self.selected=None;self._prune_img_cache();self.refresh()
+        if self.current>=0:self._snapshot();self.stop_playback();self.frames.pop(self.current);self.current=min(self.current,len(self.frames)-1);self.selected=None;self._prune_img_cache();self.refresh()
     def duplicate_frame(self):
         if self.current<0:return
+        self._snapshot()
         duplicate=json.loads(json.dumps(self.frames[self.current]));duplicate['name']=f"{duplicate.get('name','Frame')} copy"
         self.frames.insert(self.current+1,duplicate);self.current+=1;self.selected=None;self.refresh();self.status.set('Duplicated frame.')
     def label(self):
@@ -208,23 +221,26 @@ class Animator(tk.Tk):
         def save():
             key=name.get().strip()
             if not key:return
-            self.presets[key]={style:label.get(style) for style in STYLE_KEYS};self.persist_presets();self.preset_choice.set(key);box.destroy()
+            self.presets[key]={style:label.get(style) for style in STYLE_KEYS if label.get(style) is not None};self.persist_presets();self.preset_choice.set(key);box.destroy()
         ttk.Button(box,text='Save preset',command=save).pack(pady=(0,12))
-    def apply_preset_to_matching(self, include_shape=False):
+    def apply_preset_to_matching(self, include_shape=False, all_labels=False):
         label=self.label();preset=self.presets.get(self.preset_choice.get())
         if not label or not preset:return
+        self._snapshot()
         preset={key:value for key,value in preset.items() if include_shape or key!='shape'}
-        changed=0
+        target=label.get('text','').strip();changed=0
         for frame in self.frames:
             for candidate in frame.get('labels',[]):
-                if candidate.get('text')==label.get('text'):
+                if all_labels or candidate.get('text','').strip()==target:
                     candidate.update(preset);changed+=1
-        self.draw();self.load_fields();self.status.set(f"Applied preset to {changed} label(s) named {label.get('text')!r}.")
+        self.draw();self.load_fields();self.status.set(f"Applied preset to {changed} label(s).")
     def add_label(self):
         if self.current<0:return
+        self._snapshot()
         l={"id":os.urandom(6).hex(),"text":"Your label","shape":"Box","font":"Arial Bold","x":.5,"y":.5,"size":28,"color":"#FFFFFF","bg":"#5B46C8","outline":"","opacity":100,"rotation":0,"animation":"None","anim_duration":.5,"delay":0};self.frames[self.current]['labels'].append(l);self.selected=l['id'];self.draw();self.load_fields()
     def delete_label(self):
         if self.current<0 or not self.selected:return
+        self._snapshot()
         self.frames[self.current]['labels']=[x for x in self.frames[self.current]['labels'] if x['id']!=self.selected];self.selected=None;self.draw();self.load_fields()
     def load_fields(self):
         l=self.label()
@@ -335,8 +351,10 @@ class Animator(tk.Tk):
         self.canvas.delete("all")
         if self.current<0 or self.current>=len(self.frames):return
         try:im=self.transition_image(self.current,local_time)
-        except (OSError, ValueError, UnidentifiedImageError) as e:self.status.set(f"Could not display this picture: {e}");return
-        cw,ch=self.canvas.winfo_width(),self.canvas.winfo_height();self.scale=min(max(1,cw)/im.width,max(1,ch)/im.height);w,h=int(im.width*self.scale),int(im.height*self.scale);x,y=(cw-w)//2,(ch-h)//2;self.origin=(x,y,w,h);self.tkimg=ImageTk.PhotoImage(im.resize((w,h),Image.Resampling.LANCZOS));self.canvas.create_image(x,y,anchor="nw",image=self.tkimg)
+        except (OSError, ValueError, UnidentifiedImageError) as e:self.status.set(f"Could not display this picture: {e}");_log(f"Display error: {e}");return
+        cw,ch=self.canvas.winfo_width(),self.canvas.winfo_height()
+        if cw<2 or ch<2:return
+        self.scale=min(max(1,cw)/im.width,max(1,ch)/im.height);w,h=int(im.width*self.scale),int(im.height*self.scale);x,y=(cw-w)//2,(ch-h)//2;self.origin=(x,y,w,h);self.tkimg=ImageTk.PhotoImage(im.resize((w,h),Image.Resampling.LANCZOS));self.canvas.create_image(x,y,anchor="nw",image=self.tkimg)
     def shape(self,s,x,y,w,h):
         a=w/2;b=h/2;tip=_arrow_tip(w,h)
         if s=='Right arrow':return [x-a,y-b,x+a-tip,y-b,x+a,y,x+a-tip,y+b,x-a,y+b]
@@ -350,7 +368,7 @@ class Animator(tk.Tk):
         self.draw();x,y,w,h=self.origin
         for label in reversed(self.frames[self.current]['labels']):
             tw,th=self._label_box(label);tw*=self.scale;th*=self.scale;px=x+label.get('x',.5)*w;py=y+label.get('y',.5)*h
-            if px-tw/2<=e.x<=px+tw/2 and py-th/2<=e.y<=py+th/2:self.selected=label['id'];self.drag=(e.x,e.y);self.draw();self.load_fields();return
+            if px-tw/2<=e.x<=px+tw/2 and py-th/2<=e.y<=py+th/2:self._snapshot();self.selected=label['id'];self.drag=(e.x,e.y);self.draw();self.load_fields();return
         self.selected=None;self.draw();self.load_fields()
     def motion(self,e):
         l=self.label()
@@ -376,6 +394,14 @@ class Animator(tk.Tk):
     def _prune_img_cache(self):
         keep={f['image'] for f in self.frames}
         self._img_cache={k:v for k,v in self._img_cache.items() if k in keep}
+    def _snapshot(self):
+        self._undo_stack.append((copy.deepcopy(self.frames),self.current,self.selected))
+        if len(self._undo_stack)>50:self._undo_stack.pop(0)
+    def undo(self):
+        if not self._undo_stack:self.status.set("Nothing to undo.");return
+        frames,current,selected=self._undo_stack.pop()
+        self.frames=frames;self.current=min(current,len(frames)-1) if frames else -1;self.selected=selected
+        self._img_cache={};self.refresh();self.status.set("Undone.")
     def _on_close(self):
         if self._exporting and self._export_process is not None:
             try:self._export_process.terminate()
@@ -384,7 +410,20 @@ class Animator(tk.Tk):
     def save_data(self,path):
         temp=Path(str(path)+'.tmp')
         try:
-            with zipfile.ZipFile(temp,'w',zipfile.ZIP_DEFLATED) as z:z.writestr('project.json',json.dumps({"version":1,"frames":self.frames,"audio_path":str(self.audio_path) if self.audio_path else None}))
+            frames_out=[]
+            with zipfile.ZipFile(temp,'w',zipfile.ZIP_DEFLATED) as z:
+                for i,f in enumerate(self.frames):
+                    frame=dict(f)
+                    raw=base64.b64decode(frame.pop('image',''))
+                    ref=f"images/{i:05d}.img"
+                    z.writestr(ref,raw,compress_type=zipfile.ZIP_STORED)
+                    frame['image_ref']=ref
+                    frames_out.append(frame)
+                z.writestr('project.json',json.dumps({"version":2,"frames":frames_out,"audio_path":str(self.audio_path) if self.audio_path else None}))
+            if path.exists():
+                bak=Path(str(path)+'.bak')
+                if bak.exists():bak.unlink()
+                path.replace(bak)
             temp.replace(path)
         finally:
             if temp.exists():temp.unlink()
@@ -400,13 +439,17 @@ class Animator(tk.Tk):
         name=filedialog.askopenfilename(filetypes=[("Picture Animator project","*.paanim")])
         if not name:return
         try:
-            with zipfile.ZipFile(name) as z:data=json.loads(z.read('project.json'));self.frames=data['frames'];self.audio_path=Path(data['audio_path']) if data.get('audio_path') else None
-            for frame in self.frames:
-                frame.setdefault('duration',1.0);frame.setdefault('transition','Cut');frame.setdefault('transition_duration',.3)
-                for label in frame.get('labels',[]):
-                    label.setdefault('font','Arial Bold');label.setdefault('outline','');label.setdefault('opacity',100);label.setdefault('rotation',0);label.setdefault('animation','None');label.setdefault('anim_duration',.5)
+            with zipfile.ZipFile(name) as z:
+                data=json.loads(z.read('project.json'));self.frames=data['frames'];self.audio_path=Path(data['audio_path']) if data.get('audio_path') else None
+                for frame in self.frames:
+                    if 'image_ref' in frame:
+                        frame['image']=base64.b64encode(z.read(frame['image_ref'])).decode()
+                        frame.pop('image_ref',None)
+                    frame.setdefault('duration',1.0);frame.setdefault('transition','Cut');frame.setdefault('transition_duration',.3)
+                    for label in frame.get('labels',[]):
+                        label.setdefault('font','Arial Bold');label.setdefault('outline','');label.setdefault('opacity',100);label.setdefault('rotation',0);label.setdefault('animation','None');label.setdefault('anim_duration',.5)
             self.project_path=Path(name);self.current=0 if self.frames else -1;self.selected=None;self._img_cache={};self.refresh();self.status.set(f"Opened: {self.project_path.name}")
-        except Exception as e:messagebox.showerror(APP,f"Could not open project:\n{e}")
+        except Exception as e:_log(f"Open project failed: {e}");messagebox.showerror(APP,f"Could not open project:\n{e}")
     def font_for_export(self, size, family='Arial Bold'):
         paths={'Arial Bold':'C:/Windows/Fonts/arialbd.ttf','Segoe UI Bold':'C:/Windows/Fonts/segoeuib.ttf','Calibri Bold':'C:/Windows/Fonts/calibrib.ttf'}
         for path in (paths.get(family), 'C:/Windows/Fonts/arialbd.ttf','C:/Windows/Fonts/segoeuib.ttf'):
@@ -504,10 +547,11 @@ class Animator(tk.Tk):
             result=process.wait();drainer.join(timeout=10)
             detail=b''.join(stderr_parts).decode(errors='replace').strip()
             if result:raise RuntimeError(detail or f'FFmpeg exited with code {result}.')
-            self._export_result=(target,"")
+            self._export_result=(target,"");_log(f"Exported: {target}")
         except Exception as e:
             if drainer is not None:drainer.join(timeout=2)
             detail=b''.join(stderr_parts).decode(errors='replace').strip()
+            _log(f"Export failed: {detail or e}")
             self._export_result=(target,detail or str(e))
         finally:
             if process is not None:

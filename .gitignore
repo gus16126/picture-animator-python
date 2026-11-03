@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+label_presets.json
+app.log
+*.bak
+*.tmp
