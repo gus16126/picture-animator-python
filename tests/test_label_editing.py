@@ -1,10 +1,11 @@
 import base64
 import io
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from PIL import Image
 
+import app
 from app import Animator
 
 
@@ -53,6 +54,13 @@ class LabelEditingTests(unittest.TestCase):
 
         self.app.apply_preset_to_matching(include_shape=True)
         self.assertEqual(self.app.label()["shape"], "Box")
+
+    def test_color_picker_updates_only_the_requested_color(self):
+        with patch.object(app.colorchooser, "askcolor", return_value=((18, 52, 86), "#123456")):
+            self.app.pick_color("color")
+
+        self.assertEqual(self.app.label()["color"], "#123456")
+        self.assertEqual(self.app.label()["shape"], "Right arrow")
 
 
 if __name__ == "__main__":

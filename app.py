@@ -5,7 +5,7 @@ import re
 import math
 import time
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, colorchooser, filedialog, messagebox
 from PIL import Image, ImageTk, ImageDraw, ImageFont, ImageOps, ImageColor, UnidentifiedImageError
 
 APP = "Picture Animator"
@@ -72,14 +72,19 @@ class Animator(tk.Tk):
         preset_menu.configure(postcommand=lambda:[preset_menu.entryconfigure(i,state="normal" if self.label() and self.presets.get(self.preset_choice.get()) else "disabled") for i in (1,2)])
         preset_actions.configure(menu=preset_menu)
         self.fields={}
-        for key,title in [("text","Text"),("shape","Shape"),("animation","Animation"),("anim_duration","Animation time (s)"),("font","Font"),("size","Text size"),("color","Text color"),("bg","Background"),("outline","Outline"),("opacity","Opacity"),("rotation","Rotation"),("delay","Appear after (s)")]:
+        for key,title in [("text","Text"),("shape","Shape"),("animation","Animation"),("anim_duration","Animation time (s)"),("font","Font"),("size","Text size"),("color","Text color"),("bg","Background color"),("outline","Outline color"),("opacity","Opacity"),("rotation","Rotation"),("delay","Appear after (s)")]:
             ttk.Label(label_panel,text=title).pack(anchor="w",pady=(7,0))
             if key=="shape": w=ttk.Combobox(label_panel,values=SHAPES,state="readonly")
             elif key=="font": w=ttk.Combobox(label_panel,values=FONTS,state="readonly")
             elif key=="animation": w=ttk.Combobox(label_panel,values=ANIMATIONS,state="readonly")
             elif key=="text": w=tk.Text(label_panel,height=3,wrap="word",width=18)
+            elif key in ('color','bg','outline'):
+                color_row=ttk.Frame(label_panel);w=ttk.Entry(color_row);w.pack(side="left",fill="x",expand=True)
+                ttk.Button(color_row,text="Pick…",width=6,command=lambda key=key:self.pick_color(key)).pack(side="right",padx=(4,0))
+                color_row.pack(fill="x")
             else:w=ttk.Entry(label_panel)
-            w.pack(fill="x");w.bind("<KeyRelease>",lambda e,key=key:self.apply_field(key));w.bind("<<ComboboxSelected>>",lambda e,key=key:self.apply_field(key));self.fields[key]=w
+            if key not in ('color','bg','outline'):w.pack(fill="x")
+            w.bind("<KeyRelease>",lambda e,key=key:self.apply_field(key));w.bind("<<ComboboxSelected>>",lambda e,key=key:self.apply_field(key));self.fields[key]=w
         self.status=tk.StringVar(value="Add pictures to begin.");ttk.Label(self,textvariable=self.status,anchor="w",padding=6).pack(fill="x")
     def new(self): self.stop_playback();self.frames=[];self.current=-1;self.selected=None;self.project_path=None;self.audio_path=None;self._img_cache={};self.refresh()
     def add_audio(self):
@@ -226,6 +231,11 @@ class Animator(tk.Tk):
             if key=="text":w.delete("1.0","end");w.insert("1.0",str(value))
             else:w.delete(0,"end");w.insert(0,str(value))
     def valid_color(self, value): return bool(re.fullmatch(r"#[0-9a-fA-F]{6}", value))
+    def pick_color(self, key):
+        initial=self.fields[key].get() or '#000000'
+        _,value=colorchooser.askcolor(color=initial,parent=self)
+        if not value:return
+        self.fields[key].delete(0,'end');self.fields[key].insert(0,value.upper());self.apply_field(key)
     def apply_field(self, key):
         l=self.label()
         if not l:return
