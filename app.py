@@ -300,7 +300,7 @@ class Animator(tk.Tk):
         if self.playing:self.stop_playback();return
         total=self.total_duration();origin=min(self.timeline.get(),total)
         if origin>=total:origin=0;self.timeline.set(0)
-        self.playing=True;self.timeline_active=True;self.play_origin=origin;self.play_started=time.perf_counter();self.play_button.configure(text="❚❚ Pause")
+        self.playing=True;self.timeline_active=True;self.play_origin=origin;self.play_started=None;self.play_button.configure(text="❚❚ Pause")
         cw=max(2,self.canvas.winfo_width());ch=max(2,self.canvas.winfo_height());rate=max(1.0,float(self.fps.get()));frames=json.loads(json.dumps(self.frames))
         self._play_gen+=1;gen=self._play_gen;self._play_frames=[];self._play_ready=False;self._play_photos={}
         threading.Thread(target=self._prep_playback,args=(cw,ch,rate,frames,gen),daemon=True).start()
@@ -310,17 +310,17 @@ class Animator(tk.Tk):
         if hasattr(self,'play_button'):self.play_button.configure(text="▶ Play")
     def play_tick(self):
         if not self.playing:return
+        if not self._play_ready:
+            self.status.set("Preparing preview...");self.after(30,self.play_tick);return
+        if not self._play_frames:
+            self.status.set("Could not prepare preview.");self.stop_playback();return
+        if self.play_started is None:self.play_started=time.perf_counter();self.status.set("")
         position=self.play_origin+(time.perf_counter()-self.play_started);total=self.total_duration()
         if position>=total:
             self.timeline.set(total);self.render_timeline();self.stop_playback();return
         self.timeline.set(position);self.timeline_text.set(f"{self.format_time(position)} / {self.format_time(total)}")
-        if self._play_ready and self._play_frames:
-            idx=min(int(position*self._play_fps),len(self._play_frames)-1)
-            self._show_play_frame(idx)
-        elif not self._play_ready:
-            self.status.set("Preparing preview...")
-        else:
-            self.render_timeline()
+        idx=min(int(position*self._play_fps),len(self._play_frames)-1)
+        self._show_play_frame(idx)
         self.after(30,self.play_tick)
     def _prep_playback(self, cw, ch, rate, frames, gen):
         try:
@@ -334,7 +334,8 @@ class Animator(tk.Tk):
                     out.append(im.resize((max(1,int(im.width*scale)),max(1,int(im.height*scale))),Image.Resampling.LANCZOS))
             if gen==self._play_gen:
                 self._play_fps=rate;self._play_frames=out;self._play_ready=True
-        except Exception:
+        except Exception as e:
+            _log(f"Preview preparation failed: {e}")
             if gen==self._play_gen:
                 self._play_frames=[];self._play_ready=True
     def _show_play_frame(self, idx):
