@@ -67,8 +67,9 @@ class Animator(tk.Tk):
         preset_actions.pack(fill="x",pady=4)
         preset_menu=tk.Menu(preset_actions,tearoff=0)
         preset_menu.add_command(label="Save label style as preset",command=self.save_preset)
-        preset_menu.add_command(label="Apply preset to matching labels",command=self.apply_preset_to_matching)
-        preset_menu.configure(postcommand=lambda:preset_menu.entryconfigure(1,state="normal" if self.label() and self.presets.get(self.preset_choice.get()) else "disabled"))
+        preset_menu.add_command(label="Apply preset (keep shapes)",command=self.apply_preset_to_matching)
+        preset_menu.add_command(label="Apply preset including shapes",command=lambda:self.apply_preset_to_matching(include_shape=True))
+        preset_menu.configure(postcommand=lambda:[preset_menu.entryconfigure(i,state="normal" if self.label() and self.presets.get(self.preset_choice.get()) else "disabled") for i in (1,2)])
         preset_actions.configure(menu=preset_menu)
         self.fields={}
         for key,title in [("text","Text"),("shape","Shape"),("animation","Animation"),("anim_duration","Animation time (s)"),("font","Font"),("size","Text size"),("color","Text color"),("bg","Background"),("outline","Outline"),("opacity","Opacity"),("rotation","Rotation"),("delay","Appear after (s)")]:
@@ -78,7 +79,7 @@ class Animator(tk.Tk):
             elif key=="animation": w=ttk.Combobox(label_panel,values=ANIMATIONS,state="readonly")
             elif key=="text": w=tk.Text(label_panel,height=3,wrap="word",width=18)
             else:w=ttk.Entry(label_panel)
-            w.pack(fill="x");w.bind("<KeyRelease>",lambda e:self.apply_fields());w.bind("<<ComboboxSelected>>",lambda e:self.apply_fields());self.fields[key]=w
+            w.pack(fill="x");w.bind("<KeyRelease>",lambda e,key=key:self.apply_field(key));w.bind("<<ComboboxSelected>>",lambda e,key=key:self.apply_field(key));self.fields[key]=w
         self.status=tk.StringVar(value="Add pictures to begin.");ttk.Label(self,textvariable=self.status,anchor="w",padding=6).pack(fill="x")
     def new(self): self.stop_playback();self.frames=[];self.current=-1;self.selected=None;self.project_path=None;self.audio_path=None;self._img_cache={};self.refresh()
     def add_audio(self):
@@ -202,9 +203,10 @@ class Animator(tk.Tk):
             if not key:return
             self.presets[key]={style:label.get(style) for style in STYLE_KEYS};self.persist_presets();self.preset_choice.set(key);box.destroy()
         ttk.Button(box,text='Save preset',command=save).pack(pady=(0,12))
-    def apply_preset_to_matching(self):
+    def apply_preset_to_matching(self, include_shape=False):
         label=self.label();preset=self.presets.get(self.preset_choice.get())
         if not label or not preset:return
+        preset={key:value for key,value in preset.items() if include_shape or key!='shape'}
         changed=0
         for frame in self.frames:
             for candidate in frame.get('labels',[]):
@@ -220,30 +222,35 @@ class Animator(tk.Tk):
     def load_fields(self):
         l=self.label()
         for key,w in self.fields.items():
-            if key=="text":w.delete("1.0","end");w.insert("1.0",str(l[key]) if l else "")
-            else:w.delete(0,"end");w.insert(0,str(l[key]) if l else "")
+            value=l.get(key,"") if l else ""
+            if key=="text":w.delete("1.0","end");w.insert("1.0",str(value))
+            else:w.delete(0,"end");w.insert(0,str(value))
     def valid_color(self, value): return bool(re.fullmatch(r"#[0-9a-fA-F]{6}", value))
-    def apply_fields(self):
+    def apply_field(self, key):
         l=self.label()
         if not l:return
-        l['text']=self.fields['text'].get("1.0","end-1c");l['shape']=self.fields['shape'].get() or 'Box';l['font']=self.fields['font'].get() or 'Arial Bold'
-        try:l['size']=max(8,int(self.fields['size'].get()))
-        except ValueError:pass
-        color=self.fields['color'].get();bg=self.fields['bg'].get()
-        if self.valid_color(color):l['color']=color
-        if self.valid_color(bg):l['bg']=bg
-        outline=self.fields['outline'].get()
-        if not outline or self.valid_color(outline):l['outline']=outline
-        try:l['opacity']=max(0,min(100,int(self.fields['opacity'].get())))
-        except ValueError:pass
-        try:l['rotation']=float(self.fields['rotation'].get())
-        except ValueError:pass
-        try:l['delay']=max(0,float(self.fields['delay'].get() or 0))
-        except ValueError:pass
-        anim=self.fields['animation'].get()
-        if anim in ANIMATIONS:l['animation']=anim
-        try:l['anim_duration']=max(.1,float(self.fields['anim_duration'].get() or .5))
-        except ValueError:pass
+        value=self.fields[key].get("1.0","end-1c") if key=="text" else self.fields[key].get()
+        if key=='text':l['text']=value
+        elif key=='shape' and value in SHAPES:l['shape']=value
+        elif key=='font' and value in FONTS:l['font']=value
+        elif key in ('color','bg') and self.valid_color(value):l[key]=value
+        elif key=='outline' and (not value or self.valid_color(value)):l[key]=value
+        elif key=='size':
+            try:l[key]=max(8,int(value))
+            except ValueError:return
+        elif key=='opacity':
+            try:l[key]=max(0,min(100,int(value)))
+            except ValueError:return
+        elif key=='rotation':
+            try:l[key]=float(value)
+            except ValueError:return
+        elif key=='delay':
+            try:l[key]=max(0,float(value or 0))
+            except ValueError:return
+        elif key=='animation' and value in ANIMATIONS:l[key]=value
+        elif key=='anim_duration':
+            try:l[key]=max(.1,float(value or .5))
+            except ValueError:return
         self.draw()
     def render_timeline(self):
         if not self.frames:return
