@@ -35,6 +35,7 @@ class Animator(tk.Tk):
         self.frames=[]; self.current=-1; self.selected=None; self.project_path=None; self.audio_path=None; self.tkimg=None; self.scale=1; self.drag=None; self._img_cache={}
         self.presets=self.load_presets()
         self.playing=False;self.play_started=0;self.play_origin=0;self.timeline_active=False;self._exporting=False;self._export_progress="";self._export_result=None;self._export_process=None;self._draw_job=None;self._undo_stack=[]
+        self._play_frames=None;self._play_ready=False;self._play_photos={};self._play_fps=10;self._play_gen=0
         self._ui(); self.bind("<Control-s>", lambda e:self.save()); self.bind("<Control-z>", lambda e:self.undo()); self.protocol("WM_DELETE_WINDOW", self._on_close)
     def _ui(self):
         top=ttk.Frame(self,padding=8); top.pack(fill="x")
@@ -299,16 +300,52 @@ class Animator(tk.Tk):
         if self.playing:self.stop_playback();return
         total=self.total_duration();origin=min(self.timeline.get(),total)
         if origin>=total:origin=0;self.timeline.set(0)
-        self.playing=True;self.timeline_active=True;self.play_origin=origin;self.play_started=time.perf_counter();self.play_button.configure(text="❚❚ Pause");self.play_tick()
+        self.playing=True;self.timeline_active=True;self.play_origin=origin;self.play_started=time.perf_counter();self.play_button.configure(text="❚❚ Pause")
+        cw=max(2,self.canvas.winfo_width());ch=max(2,self.canvas.winfo_height());rate=max(1.0,float(self.fps.get()));frames=json.loads(json.dumps(self.frames))
+        self._play_gen+=1;gen=self._play_gen;self._play_frames=[];self._play_ready=False;self._play_photos={}
+        threading.Thread(target=self._prep_playback,args=(cw,ch,rate,frames,gen),daemon=True).start()
+        self.play_tick()
     def stop_playback(self):
-        self.playing=False
+        self.playing=False;self._play_frames=None;self._play_ready=False;self._play_photos={}
         if hasattr(self,'play_button'):self.play_button.configure(text="▶ Play")
     def play_tick(self):
         if not self.playing:return
         position=self.play_origin+(time.perf_counter()-self.play_started);total=self.total_duration()
         if position>=total:
             self.timeline.set(total);self.render_timeline();self.stop_playback();return
-        self.timeline.set(position);self.render_timeline();self.after(30,self.play_tick)
+        self.timeline.set(position);self.timeline_text.set(f"{self.format_time(position)} / {self.format_time(total)}")
+        if self._play_ready and self._play_frames:
+            idx=min(int(position*self._play_fps),len(self._play_frames)-1)
+            self._show_play_frame(idx)
+        elif not self._play_ready:
+            self.status.set("Preparing preview...")
+        else:
+            self.render_timeline()
+        self.after(30,self.play_tick)
+    def _prep_playback(self, cw, ch, rate, frames, gen):
+        try:
+            renderer=Animator.__new__(Animator);renderer.frames=frames;renderer._img_cache={}
+            out=[]
+            for index,f in enumerate(frames):
+                steps=max(1,math.ceil(renderer.frame_duration(f)*rate))
+                for step in range(steps):
+                    im=renderer.transition_image(index,step/rate)
+                    scale=min(cw/im.width,ch/im.height)
+                    out.append(im.resize((max(1,int(im.width*scale)),max(1,int(im.height*scale))),Image.Resampling.LANCZOS))
+            if gen==self._play_gen:
+                self._play_fps=rate;self._play_frames=out;self._play_ready=True
+        except Exception:
+            if gen==self._play_gen:
+                self._play_frames=[];self._play_ready=True
+    def _show_play_frame(self, idx):
+        pil=self._play_frames[idx]
+        photo=self._play_photos.get(idx)
+        if photo is None:
+            photo=ImageTk.PhotoImage(pil);self._play_photos[idx]=photo
+        self.canvas.delete("all")
+        cw,ch=self.canvas.winfo_width(),self.canvas.winfo_height()
+        x,y=(cw-pil.width)//2,(ch-pil.height)//2
+        self.canvas.create_image(x,y,anchor="nw",image=photo)
     def render_frame_image(self, frame, local_time=None):
         image=self.frame_image(frame);duration=self.frame_duration(frame)
         for label in frame['labels']:
