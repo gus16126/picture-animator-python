@@ -37,6 +37,9 @@ class Animator(tk.Tk):
         self.playing=False;self.play_started=0;self.play_origin=0;self.timeline_active=False;self._exporting=False;self._export_progress="";self._export_result=None;self._export_process=None;self._draw_job=None;self._undo_stack=[]
         self._play_frames=None;self._play_ready=False;self._play_photos={};self._play_fps=10;self._play_gen=0
         self._ui(); self.bind("<Control-s>", lambda e:self.save()); self.bind("<Control-z>", lambda e:self.undo()); self.protocol("WM_DELETE_WINDOW", self._on_close)
+    def report_callback_exception(self, exc, val, tb):
+        import traceback as _tb
+        _log("Uncaught error:\n" + "".join(_tb.format_exception(exc, val, tb)).strip())
     def _ui(self):
         top=ttk.Frame(self,padding=8); top.pack(fill="x")
         for text,cmd in [("New",self.new),("Add pictures",self.add_pictures),("Open project",self.open_project),("Save",self.save),("Save as",self.save_as),("Undo",self.undo),("Export MP4",self.export_mp4)]: ttk.Button(top,text=text,command=cmd).pack(side="left",padx=3)
