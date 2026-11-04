@@ -190,7 +190,12 @@ class Animator(tk.Tk):
     def pick_frame(self,e=None):
         x=self.listbox.curselection()
         if x:
-            self.stop_playback();self.current=x[0];self.selected=None;self.timeline_active=False;self.draw();self.load_fields();self.load_duration();self.load_transition()
+            self.stop_playback();self.current=x[0]
+            # Select a label when the frame changes.  Clearing this selection made
+            # every label control look empty, even though its values were saved.
+            labels=self.frames[self.current].get('labels',[])
+            self.selected=labels[0].get('id') if labels else None
+            self.timeline_active=False;self.draw();self.load_fields();self.load_duration();self.load_transition()
     def rename_frame(self,e=None):
         if self.current<0:return
         box=tk.Toplevel(self);box.title("Rename frame");v=tk.StringVar(value=self.frames[self.current]['name']);ttk.Entry(box,textvariable=v,width=35).pack(padx=10,pady=10);ttk.Button(box,text="Save",command=lambda:(self._snapshot(),self.frames[self.current].update(name=v.get().strip() or 'Untitled frame'),box.destroy(),self.refresh())).pack(pady=(0,10))
@@ -293,7 +298,10 @@ class Animator(tk.Tk):
         total=self.total_duration();position=min(max(0,self.timeline.get()),total);self.timeline.set(position)
         index,local_time=self.frame_at_time(position)
         if index!=self.current:
-            self.current=index;self.selected=None;self.listbox.selection_clear(0,'end');self.listbox.selection_set(index);self.listbox.activate(index);self.load_fields();self.load_duration();self.load_transition()
+            self.current=index
+            labels=self.frames[index].get('labels',[])
+            self.selected=labels[0].get('id') if labels else None
+            self.listbox.selection_clear(0,'end');self.listbox.selection_set(index);self.listbox.activate(index);self.load_fields();self.load_duration();self.load_transition()
         self.timeline_text.set(f"{self.format_time(position)} / {self.format_time(total)}")
         self.draw(local_time)
     def seek_timeline(self, value):
@@ -304,27 +312,21 @@ class Animator(tk.Tk):
         if self.playing:self.stop_playback();return
         total=self.total_duration();origin=min(self.timeline.get(),total)
         if origin>=total:origin=0;self.timeline.set(0)
-        self.playing=True;self.timeline_active=True;self.play_origin=origin;self.play_started=None;self.play_button.configure(text="❚❚ Pause")
-        cw=max(2,self.canvas.winfo_width());ch=max(2,self.canvas.winfo_height());rate=max(1.0,float(self.fps.get()));frames=json.loads(json.dumps(self.frames))
-        self._play_gen+=1;gen=self._play_gen;self._play_frames=[];self._play_ready=False;self._play_photos={}
-        threading.Thread(target=self._prep_playback,args=(cw,ch,rate,frames,gen),daemon=True).start()
+        # Render directly on the Tk thread.  The pre-render worker could finish
+        # with stale or incomplete frames, leaving a moving playhead and a frozen
+        # preview canvas.
+        self.playing=True;self.timeline_active=True;self.play_origin=origin;self.play_started=time.perf_counter();self.play_button.configure(text="❚❚ Pause")
         self.play_tick()
     def stop_playback(self):
         self.playing=False;self._play_frames=None;self._play_ready=False;self._play_photos={}
         if hasattr(self,'play_button'):self.play_button.configure(text="▶ Play")
     def play_tick(self):
         if not self.playing:return
-        if not self._play_ready:
-            self.status.set("Preparing preview...");self.after(30,self.play_tick);return
-        if not self._play_frames:
-            self.status.set("Could not prepare preview.");self.stop_playback();return
-        if self.play_started is None:self.play_started=time.perf_counter();self.status.set("")
         position=self.play_origin+(time.perf_counter()-self.play_started);total=self.total_duration()
         if position>=total:
             self.timeline.set(total);self.render_timeline();self.stop_playback();return
         self.timeline.set(position);self.timeline_text.set(f"{self.format_time(position)} / {self.format_time(total)}")
-        idx=min(int(position*self._play_fps),len(self._play_frames)-1)
-        self._show_play_frame(idx)
+        self.render_timeline()
         self.after(30,self.play_tick)
     def _prep_playback(self, cw, ch, rate, frames, gen):
         try:

@@ -1,6 +1,9 @@
 import base64
 import io
+import json
+import tempfile
 import unittest
+import zipfile
 from unittest.mock import Mock, patch
 
 from PIL import Image
@@ -46,6 +49,31 @@ class LabelEditingTests(unittest.TestCase):
         label = self.app.label()
         self.assertEqual(label["text"], "Changed text")
         self.assertEqual(label["shape"], "Right arrow")
+
+    def test_selecting_a_frame_keeps_its_first_label_selected(self):
+        self.app.selected = None
+        self.app.listbox.insert("end", "1. Frame")
+        self.app.listbox.selection_set(0)
+
+        self.app.pick_frame()
+
+        self.assertEqual(self.app.selected, "arrow-label")
+        self.assertEqual(self.app.fields["animation"].get(), "None")
+
+    def test_project_save_keeps_label_animation_settings(self):
+        label = self.app.label()
+        label.update({"animation": "Bounce", "anim_duration": 1.25, "delay": .4})
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = app.Path(directory) / "animation.picanim"
+            self.app.save_data(path)
+            with zipfile.ZipFile(path) as archive:
+                saved = json.loads(archive.read("project.json"))
+
+        stored = saved["frames"][0]["labels"][0]
+        self.assertEqual(stored["animation"], "Bounce")
+        self.assertEqual(stored["anim_duration"], 1.25)
+        self.assertEqual(stored["delay"], .4)
 
     def test_default_preset_application_preserves_shapes(self):
         self.app.presets = {"box-style": {"shape": "Box", "color": "#000000"}}
