@@ -253,9 +253,10 @@ class Animator(tk.Tk):
         l=self.label()
         for key,w in self.fields.items():
             value=l.get(key,"") if l else ""
-            if key=="text":w.delete("1.0","end");w.insert("1.0",str(value))
+            if isinstance(w,ttk.Combobox):w.set(str(value))
+            elif key=="text":w.delete("1.0","end");w.insert("1.0",str(value))
             else:w.delete(0,"end");w.insert(0,str(value))
-    def valid_color(self, value): return bool(re.fullmatch(r"#[0-9a-fA-F]{6}", value))
+    def valid_color(self, value): return isinstance(value,str) and bool(re.fullmatch(r"#[0-9a-fA-F]{6}", value))
     def pick_color(self, key):
         initial=self.fields[key].get() or '#000000'
         _,value=colorchooser.askcolor(color=initial,parent=self)
@@ -479,6 +480,23 @@ class Animator(tk.Tk):
         if not self.frames:return
         name=filedialog.asksaveasfilename(defaultextension='.paanim',filetypes=[("Picture Animator project","*.paanim")])
         if name:self.project_path=Path(name);self.save()
+    def _normalize_label(self, label):
+        defaults={"id":os.urandom(6).hex(),"text":"Your label","shape":"Box","font":"Arial Bold","x":.5,"y":.5,"size":28,"color":"#FFFFFF","bg":"#5B46C8","outline":"","opacity":100,"rotation":0,"animation":"None","anim_duration":.5,"delay":0}
+        for key,value in defaults.items():label.setdefault(key,value)
+        if label['shape'] not in SHAPES:label['shape']=defaults['shape']
+        if label['font'] not in FONTS:label['font']=defaults['font']
+        if not self.valid_color(label['color']):label['color']=defaults['color']
+        if not self.valid_color(label['bg']):label['bg']=defaults['bg']
+        if label['outline'] and not self.valid_color(label['outline']):label['outline']=''
+        if label['animation'] not in ANIMATIONS:label['animation']=defaults['animation']
+        for key,low,high,default in (("x",0,1,.5),("y",0,1,.5),("opacity",0,100,100),("delay",0,float('inf'),0),("anim_duration",.1,float('inf'),.5)):
+            try:label[key]=max(low,min(high,float(label[key])))
+            except (TypeError,ValueError):label[key]=default
+        try:label['size']=max(8,int(label['size']))
+        except (TypeError,ValueError):label['size']=28
+        try:label['rotation']=float(label['rotation'])
+        except (TypeError,ValueError):label['rotation']=0
+        return label
     def open_project(self):
         name=filedialog.askopenfilename(filetypes=[("Picture Animator project","*.paanim")])
         if not name:return
@@ -489,10 +507,8 @@ class Animator(tk.Tk):
                     if 'image_ref' in frame:
                         frame['image']=base64.b64encode(z.read(frame['image_ref'])).decode()
                         frame.pop('image_ref',None)
-                    frame.setdefault('duration',1.0);frame.setdefault('transition','Cut');frame.setdefault('transition_duration',.3)
-                    for label in frame.get('labels',[]):
-                        label.setdefault('font','Arial Bold');label.setdefault('outline','');label.setdefault('opacity',100);label.setdefault('rotation',0);label.setdefault('animation','None');label.setdefault('anim_duration',.5)
-            self.project_path=Path(name);self.current=0 if self.frames else -1;self.selected=None;self._img_cache={};self.refresh();self.status.set(f"Opened: {self.project_path.name}")
+                    frame.setdefault('duration',1.0);frame.setdefault('transition','Cut');frame.setdefault('transition_duration',.3);labels=frame.get('labels',[]);frame['labels']=[self._normalize_label(label) for label in labels if isinstance(label,dict)] if isinstance(labels,list) else []
+            self.project_path=Path(name);self.current=0 if self.frames else -1;self.selected=self.frames[0]['labels'][0]['id'] if self.frames and self.frames[0].get('labels') else None;self._img_cache={};self.refresh();self.status.set(f"Opened: {self.project_path.name}")
         except Exception as e:_log(f"Open project failed: {e}");messagebox.showerror(APP,f"Could not open project:\n{e}")
     def font_for_export(self, size, family='Arial Bold'):
         paths={'Arial Bold':'C:/Windows/Fonts/arialbd.ttf','Segoe UI Bold':'C:/Windows/Fonts/segoeuib.ttf','Calibri Bold':'C:/Windows/Fonts/calibrib.ttf'}

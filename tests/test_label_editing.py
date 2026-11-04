@@ -34,6 +34,9 @@ class LabelEditingTests(unittest.TestCase):
         self.app.load_fields()
 
     def test_editing_text_preserves_the_selected_label_shape(self):
+        self.assertEqual(self.app.fields["shape"].get(), "Right arrow")
+        self.assertEqual(self.app.fields["font"].get(), "Arial Bold")
+        self.assertEqual(self.app.fields["animation"].get(), "None")
         text = self.app.fields["text"]
         text.delete("1.0", "end")
         text.insert("1.0", "Changed text")
@@ -61,6 +64,21 @@ class LabelEditingTests(unittest.TestCase):
 
         self.assertEqual(self.app.label()["color"], "#123456")
         self.assertEqual(self.app.label()["shape"], "Right arrow")
+
+    def test_opening_a_project_normalizes_blank_label_values(self):
+        animator = Animator.__new__(Animator)
+        label = {"id": "label", "text": "", "shape": "", "font": "", "x": "", "y": None,
+                 "size": "", "color": "", "bg": None, "outline": "bad", "opacity": "",
+                 "rotation": "", "animation": "", "anim_duration": "", "delay": ""}
+
+        Animator._normalize_label(animator, label)
+
+        self.assertEqual(label["shape"], "Box")
+        self.assertEqual(label["font"], "Arial Bold")
+        self.assertEqual(label["color"], "#FFFFFF")
+        self.assertEqual(label["bg"], "#5B46C8")
+        self.assertEqual(label["rotation"], 0)
+        self.assertEqual(label["animation"], "None")
 
 
 if __name__ == "__main__":
