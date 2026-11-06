@@ -11,21 +11,9 @@ import app
 from app import Animator
 
 
-class _Stream:
-    def __init__(self):
-        self.closed = False
-        self.writes = []
-
-    def write(self, data):
-        self.writes.append(data)
-
-    def close(self):
-        self.closed = True
-
-
 class _Process:
     def __init__(self):
-        self.stdin = _Stream()
+        self.stdin = None
         self.stdout = io.BytesIO()
         self.stderr = io.BytesIO()
 
@@ -57,19 +45,26 @@ class ExportStreamTests(unittest.TestCase):
         self.app.current = 0
         self.app.fps.set(1)
 
-    def test_export_streams_raw_frames_to_ffmpeg_without_png_staging(self):
+    def test_export_uses_timed_still_images_for_unchanged_frames(self):
         process = _Process()
         with tempfile.TemporaryDirectory() as directory:
             target = str(Path(directory) / "animation.mp4")
-            with patch.object(app.subprocess, "Popen", return_value=process) as popen:
+            def start(command, **kwargs):
+                Path(command[-1]).write_bytes(b"video")
+                return process
+            with patch.object(app.subprocess, "Popen", side_effect=start) as popen:
                 self.app._export_video("ffmpeg", target, 1, self.app.frames, None)
 
         command = popen.call_args.args[0]
-        self.assertIn("rawvideo", command)
-        self.assertIn("rgb24", command)
-        self.assertNotIn("%05d.png", command)
-        self.assertEqual(process.stdin.writes, [b"\xff\x00\x00" * 8])
+        self.assertIn("concat", command)
+        self.assertIn("cfr", command)
+        self.assertIn("-r", command)
+        self.assertIn("ultrafast", command)
+        self.assertNotIn("rawvideo", command)
         self.assertEqual(self.app._export_result, (target, ""))
+
+    def test_static_frame_is_rendered_once_not_once_per_export_fps_tick(self):
+        self.assertEqual(self.app.export_sample_times(0, 10), [0.0])
 
 
 if __name__ == "__main__":

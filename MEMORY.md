@@ -38,7 +38,7 @@ The main user requirement is simple: the app must do what the user asks without 
 - Added color pickers for label colors.
 - Added compact menus for label and preset actions.
 - Added frame-list scrolling and protected the preview width.
-- Improved video export: FFmpeg receives raw frames by a pipe, exports run in the background, progress is shown, audio looping is bounded, FFmpeg stderr is drained, and export cancellation/cleanup is handled.
+- Improved video export: unchanged full-resolution frames are rendered once as timed stills instead of repeatedly copied through a raw-video pipe; FFmpeg expands them at the chosen FPS. Exports run in the background, progress is shown, audio looping is bounded, FFmpeg stderr is drained, and export cancellation/cleanup is handled. Encoding writes to a temporary `.partial.mp4` and replaces the requested file only after successful completion, so an interrupted export cannot leave a zero-byte final MP4.
 - Added project-version-2 storage, image cache management, Undo, automatic `.bak` save backups, preset application across matching/all labels, and error logging.
 - Hardened loading of older or hand-edited projects by normalizing missing label fields.
 - Fixed blank read-only controls after opening a project.
