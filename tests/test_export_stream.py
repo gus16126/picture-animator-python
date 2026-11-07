@@ -59,7 +59,8 @@ class ExportStreamTests(unittest.TestCase):
         self.assertIn("concat", command)
         self.assertIn("cfr", command)
         self.assertIn("-r", command)
-        self.assertIn("ultrafast", command)
+        self.assertIn("veryfast", command)
+        self.assertIn("17", command)
         self.assertNotIn("rawvideo", command)
         self.assertEqual(self.app._export_result, (target, ""))
 

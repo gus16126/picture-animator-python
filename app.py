@@ -645,7 +645,11 @@ class Animator(tk.Tk):
                 command += ['-fps_mode','cfr','-r',str(rate)]
                 if suffix=='.gif':pass
                 elif suffix=='.webm':command += ['-c:v','libvpx-vp9','-crf','32','-b:v','0']
-                else:command += ['-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p','-movflags','+faststart']
+                # CRF 17 is visually high quality for detailed source photos.
+                # The concat input has already removed the old raw-frame pipe
+                # bottleneck, so veryfast remains practical without smearing
+                # detailed pictures near the end of a longer video.
+                else:command += ['-c:v','libx264','-preset','veryfast','-crf','17','-pix_fmt','yuv420p','-movflags','+faststart']
                 if has_audio:command += ['-shortest']
                 target_path=Path(target);partial=target_path.with_name(f'{target_path.stem}.partial{target_path.suffix}')
                 command += [str(partial)]
