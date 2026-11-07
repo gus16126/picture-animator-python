@@ -30,6 +30,7 @@ The main user requirement is simple: the app must do what the user asks without 
 - Label actions (Add/Delete) and preset actions (Save/Apply) are grouped into menus to conserve control-panel space.
 - Playback must visibly update the preview as the playhead moves.
 - Save/Open must preserve every label field on every frame, including animation, duration, and delay.
+- Frame names must be editable by double-click, F2, or Frame actions. Frame downloads must be labelled PNG renderings, not bare original photos: the user needs each downloaded picture to include its label shapes and text.
 
 ## Completed work
 
@@ -45,10 +46,13 @@ The main user requirement is simple: the app must do what the user asks without 
 - Fixed blank read-only controls after opening a project.
 - Fixed apparent “missing settings”: selecting a frame or reaching a frame while playback now selects that frame’s first label rather than clearing selection and blanking the label editor.
 - Removed the unreliable pre-rendered preview playback path. Playback now renders directly on the Tk thread each tick, which restores visible preview updates.
+- Restored reliable frame actions: selected frames can be renamed through double-click, F2, or the Frame actions menu; one or all frames can be downloaded as labelled PNG pictures.
 
 ## Important recent verification
 
 On 2026-11-07, the user verified the real 39-frame `2-car-front-cab-inspection.paanim` project exports quickly and beautifully to MP4 after the stable-aspect-ratio fix. This is the known-good export design: render frames directly in order, use the first source picture as the output canvas, and fit later differently shaped pictures without stretching or cropping.
+
+On 2026-11-07, the user verified that the restored rename controls and labelled PNG frame downloads work exactly as needed.
 
 The automated suite currently has 15 passing tests. It covers duplication, direct export streaming, stable export canvas sizing, label shapes and animations, color picker behavior, preset behavior, save persistence of animation settings, label selection across frames, and playback redraw calls. Real FFmpeg export smoke tests also pass.
 
@@ -56,6 +60,8 @@ The automated suite currently has 15 passing tests. It covers duplication, direc
 
 - The direct playback renderer favors reliable visible playback over pre-rendering every frame. Do not reintroduce background preview rendering without proving it cannot leave a moving timeline with a frozen canvas.
 - Projects can contain several labels on one frame. Frame selection intentionally selects the first label; the user can click another label in the preview to edit it.
+- Do not change the direct MP4 export pipeline or the first-frame canvas rule without reproducing changes against a real mixed-aspect-ratio project. Earlier concat/timed-still optimizations distorted the ending frames of the real project.
+- Labelled-frame downloads use `render_frame_image(frame, None)`, deliberately rendering all labels as a static PNG regardless of their playback delay or animation. This is the intended downloadable documentation image.
 - The `app.log` file should be checked first when a GUI action fails without an on-screen error.
 - FFmpeg is looked up first at `~/ffmpeg.exe`, then on `PATH`.
 - Preserve unrelated untracked files, especially `.github/`, unless the user explicitly asks to include or change them.
