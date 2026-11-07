@@ -573,99 +573,42 @@ class Animator(tk.Tk):
         if error:messagebox.showerror(APP,f"MP4 export failed:\n{error[-3000:]}")
         else:self.status.set(f"Exported: {Path(target).name}")
 
-    def export_sample_times(self, index, rate):
-        """Return the local times where the rendered picture can change.
-
-        Unchanged pictures are represented by one still with a duration in the
-        FFmpeg concat manifest.  This avoids pushing an identical 12 MP RGB
-        picture through a Python pipe ten times every second.
-        """
-        frame=self.frames[index];duration=self.frame_duration(frame);times={0.0,duration}
-        step=1/max(.1,float(rate))
-        def boundary(value):
-            if 0<value<duration:times.add(value)
-        def animated(start,end):
-            start=max(0,min(duration,start));end=max(start,min(duration,end))
-            boundary(start);boundary(end)
-            tick=math.ceil(start/step-1e-9)*step
-            while tick<end:
-                boundary(tick);tick+=step
-        if index and self.transition_for(frame)!='Cut':animated(0,self.transition_duration_for(frame))
-        for label in frame.get('labels',[]):
-            delay=max(0,float(label.get('delay',0)));animation=label.get('animation','None')
-            length=max(.1,float(label.get('anim_duration',.5)))
-            boundary(delay)
-            if animation=='Fade out':
-                fade_start=max(delay,duration-length);boundary(fade_start);animated(fade_start,duration)
-            elif animation in ('Fade in','Slide left','Slide right','Pop','Typewriter'):
-                animated(delay,delay+length)
-            elif animation in ('Pulse','Bounce','Wiggle'):
-                animated(delay,duration)
-        return sorted(time for time in times if time<duration)
-
-    @staticmethod
-    def _concat_path(path):
-        return path.as_posix().replace("'", r"'\\''")
-
     def _export_video(self, ff, target, rate, frames, audio_path):
         process=None;drainer=None;stderr_parts=[];partial=None
         try:
             renderer=Animator.__new__(Animator);renderer.frames=frames;renderer._img_cache={}
             images=[renderer.frame_image(f) for f in frames]
             width=max(im.width for im in images);height=max(im.height for im in images);width+=width%2;height+=height%2
-            sample_times=[renderer.export_sample_times(index,rate) for index in range(len(frames))]
-            total_steps=sum(len(times) for times in sample_times);completed=0
-            with tempfile.TemporaryDirectory(prefix='picture-animator-export-') as directory:
-                temp=Path(directory);manifest=temp/'frames.txt';entries=[]
-                for index,times in enumerate(sample_times):
-                    duration=renderer.frame_duration(frames[index])
-                    for position,time_value in enumerate(times):
-                        next_time=times[position+1] if position+1<len(times) else duration
-                        image=renderer.transition_image(index,time_value)
-                        canvas=Image.new('RGB',(width,height),'black');canvas.paste(image,((width-image.width)//2,(height-image.height)//2))
-                        picture=temp/f'frame-{completed:06d}.png';canvas.save(picture,format='PNG',compress_level=1)
-                        entries.append((picture,max(.001,next_time-time_value)));completed+=1
-                        self._export_progress=f"Rendering: {completed}/{total_steps} images ({completed*100//total_steps}%)"
-                with manifest.open('w',encoding='utf-8',newline='\n') as output:
-                    output.write('ffconcat version 1.0\n')
-                    for picture,duration in entries:
-                        output.write(f"file '{self._concat_path(picture)}'\nduration {duration:.9f}\n")
-                    # The concat format ignores the final duration unless the last
-                    # image is repeated from a distinct input path.  -t below
-                    # trims that repeated image.
-                    final_picture=temp/'final-frame.png';shutil.copyfile(entries[-1][0],final_picture)
-                    output.write(f"file '{self._concat_path(final_picture)}'\n")
-                command=[ff,'-y','-loglevel','error','-f','concat','-safe','0','-i',str(manifest)]
-                has_audio=bool(audio_path and audio_path.exists())
-                if has_audio:command += ['-stream_loop','-1','-i',str(audio_path),'-c:a','aac']
-                suffix=Path(target).suffix.lower()
-                # FFmpeg expands stills to the chosen output FPS itself.  This
-                # keeps the requested timing exact without Python repeatedly
-                # rendering and piping the same full-resolution image.
-                command += ['-fps_mode','cfr','-r',str(rate)]
-                if suffix=='.gif':pass
-                elif suffix=='.webm':command += ['-c:v','libvpx-vp9','-crf','32','-b:v','0']
-                # CRF 17 is visually high quality for detailed source photos.
-                # The concat input has already removed the old raw-frame pipe
-                # bottleneck, so veryfast remains practical without smearing
-                # detailed pictures near the end of a longer video.
-                else:command += ['-c:v','libx264','-preset','veryfast','-crf','17','-pix_fmt','yuv420p','-movflags','+faststart']
-                if has_audio:command += ['-shortest']
-                target_path=Path(target);partial=target_path.with_name(f'{target_path.stem}.partial{target_path.suffix}')
-                command += [str(partial)]
-                self._export_progress='Encoding video...'
-                process=subprocess.Popen(command,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE);self._export_process=process
-                def _drain():
-                    try:
-                        while True:
-                            chunk=process.stderr.read(65536)
-                            if not chunk:break
-                            stderr_parts.append(chunk)
-                    except Exception:pass
-                drainer=threading.Thread(target=_drain,daemon=True);drainer.start()
-                result=process.wait();drainer.join(timeout=10)
-                detail=b''.join(stderr_parts).decode(errors='replace').strip()
-                if result:raise RuntimeError(detail or f'FFmpeg exited with code {result}.')
+            total_steps=sum(max(1,math.ceil(renderer.frame_duration(frame)*rate)) for frame in frames)
+            target_path=Path(target);partial=target_path.with_name(f'{target_path.stem}.partial{target_path.suffix}')
+            command=[ff,'-y','-loglevel','error','-f','rawvideo','-pix_fmt','rgb24','-s:v',f'{width}x{height}','-framerate',str(rate),'-i','-']
+            if audio_path and audio_path.exists():command += ['-stream_loop','-1','-i',str(audio_path),'-c:a','aac']
+            suffix=target_path.suffix.lower()
+            if suffix=='.gif':command += ['-vf','fps='+str(rate)+',scale=trunc(iw/2)*2:trunc(ih/2)*2:flags=lanczos']
+            elif suffix=='.webm':command += ['-c:v','libvpx-vp9','-crf','32','-b:v','0']
+            else:command += ['-c:v','libx264','-preset','veryfast','-crf','17','-pix_fmt','yuv420p','-movflags','+faststart']
+            command += ['-t',f'{total_steps/rate:.6f}',str(partial)]
+            process=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE);self._export_process=process
+            def _drain():
+                try:
+                    while True:
+                        chunk=process.stderr.read(65536)
+                        if not chunk:break
+                        stderr_parts.append(chunk)
+                except Exception:pass
+            drainer=threading.Thread(target=_drain,daemon=True);drainer.start()
+            output_index=0
+            for index,frame in enumerate(frames):
+                steps=max(1,math.ceil(renderer.frame_duration(frame)*rate))
+                for step in range(steps):
+                    image=renderer.transition_image(index,step/rate)
+                    canvas=Image.new('RGB',(width,height),'black');canvas.paste(image,((width-image.width)//2,(height-image.height)//2))
+                    process.stdin.write(canvas.tobytes());output_index+=1
+                    self._export_progress=f"Exporting: {output_index}/{total_steps} frames ({output_index*100//total_steps}%)"
+            process.stdin.close()
+            result=process.wait();drainer.join(timeout=10)
+            detail=b''.join(stderr_parts).decode(errors='replace').strip()
+            if result:raise RuntimeError(detail or f'FFmpeg exited with code {result}.')
             if not partial.is_file() or partial.stat().st_size==0:raise RuntimeError('FFmpeg did not create a video file.')
             partial.replace(target)
             final=Path(target)
