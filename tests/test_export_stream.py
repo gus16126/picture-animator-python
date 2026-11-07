@@ -76,6 +76,25 @@ class ExportStreamTests(unittest.TestCase):
         self.assertEqual(process.stdin.writes, [b"\xff\x00\x00" * 8])
         self.assertEqual(self.app._export_result, (target, ""))
 
+    def test_export_uses_the_first_frame_as_its_stable_canvas_size(self):
+        process = _Process()
+        portrait_data = io.BytesIO()
+        Image.new("RGB", (2, 4), "blue").save(portrait_data, format="PNG")
+        self.app.frames.append({
+            "name": "Portrait", "image": base64.b64encode(portrait_data.getvalue()).decode(),
+            "labels": [], "duration": 1.0, "transition": "Cut", "transition_duration": .3,
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            target = str(Path(directory) / "animation.mp4")
+            def start(command, **kwargs):
+                Path(command[-1]).write_bytes(b"video")
+                return process
+            with patch.object(app.subprocess, "Popen", side_effect=start) as popen:
+                self.app._export_video("ffmpeg", target, 1, self.app.frames, None)
+
+        command = popen.call_args.args[0]
+        self.assertEqual(command[command.index("-s:v") + 1], "4x2")
+
 
 if __name__ == "__main__":
     unittest.main()

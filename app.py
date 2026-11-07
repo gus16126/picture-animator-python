@@ -578,7 +578,10 @@ class Animator(tk.Tk):
         try:
             renderer=Animator.__new__(Animator);renderer.frames=frames;renderer._img_cache={}
             images=[renderer.frame_image(f) for f in frames]
-            width=max(im.width for im in images);height=max(im.height for im in images);width+=width%2;height+=height%2
+            # Keep one stable video aspect ratio based on the first picture.
+            # Combining the widest and tallest source dimensions made projects
+            # with a portrait picture near the end become a square video.
+            width,height=images[0].size;width+=width%2;height+=height%2
             total_steps=sum(max(1,math.ceil(renderer.frame_duration(frame)*rate)) for frame in frames)
             target_path=Path(target);partial=target_path.with_name(f'{target_path.stem}.partial{target_path.suffix}')
             command=[ff,'-y','-loglevel','error','-f','rawvideo','-pix_fmt','rgb24','-s:v',f'{width}x{height}','-framerate',str(rate),'-i','-']
@@ -602,6 +605,8 @@ class Animator(tk.Tk):
                 steps=max(1,math.ceil(renderer.frame_duration(frame)*rate))
                 for step in range(steps):
                     image=renderer.transition_image(index,step/rate)
+                    scale=min(1.0,width/image.width,height/image.height)
+                    if scale<1:image=image.resize((max(1,round(image.width*scale)),max(1,round(image.height*scale))),Image.Resampling.LANCZOS)
                     canvas=Image.new('RGB',(width,height),'black');canvas.paste(image,((width-image.width)//2,(height-image.height)//2))
                     process.stdin.write(canvas.tobytes());output_index+=1
                     self._export_progress=f"Exporting: {output_index}/{total_steps} frames ({output_index*100//total_steps}%)"
