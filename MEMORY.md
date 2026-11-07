@@ -47,7 +47,9 @@ The main user requirement is simple: the app must do what the user asks without 
 
 ## Important recent verification
 
-On 2026-11-03, the full automated suite passed (14 tests). It covers duplication, export streaming, label shapes and animations, color picker behavior, preset behavior, save persistence of animation settings, label selection across frames, and playback redraw calls. A live Tk canvas check also confirmed that playback advances the timeline and creates a preview image.
+On 2026-11-07, the user verified the real 39-frame `2-car-front-cab-inspection.paanim` project exports quickly and beautifully to MP4 after the stable-aspect-ratio fix. This is the known-good export design: render frames directly in order, use the first source picture as the output canvas, and fit later differently shaped pictures without stretching or cropping.
+
+The automated suite currently has 15 passing tests. It covers duplication, direct export streaming, stable export canvas sizing, label shapes and animations, color picker behavior, preset behavior, save persistence of animation settings, label selection across frames, and playback redraw calls. Real FFmpeg export smoke tests also pass.
 
 ## Known context / future care
 
