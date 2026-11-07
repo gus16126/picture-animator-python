@@ -47,13 +47,21 @@ class Animator(tk.Tk):
         ttk.Label(top,text="  Projects are saved as .paanim files, including their pictures.").pack(side="left")
         body=ttk.PanedWindow(self,orient="horizontal"); body.pack(fill="both",expand=True,padx=8,pady=(0,8))
         left=ttk.Frame(body,padding=8); body.add(left,weight=1)
-        ttk.Label(left,text="Frames (double-click name to rename)",font=("Segoe UI",10,"bold")).pack(anchor="w")
+        ttk.Label(left,text="Frames (double-click or F2 to rename)",font=("Segoe UI",10,"bold")).pack(anchor="w")
         frame_list=ttk.Frame(left);frame_list.pack(fill="both",expand=True)
         self.listbox=tk.Listbox(frame_list,selectmode='extended');self.listbox.pack(side="left",fill="both",expand=True)
         frame_scroll=ttk.Scrollbar(frame_list,orient="vertical",command=self.listbox.yview);frame_scroll.pack(side="right",fill="y")
-        self.listbox.configure(yscrollcommand=frame_scroll.set);self.listbox.bind("<<ListboxSelect>>",self.pick_frame);self.listbox.bind("<Double-Button-1>",self.rename_frame);self.listbox.bind("<ButtonPress-1>",self.frame_drag_start,add='+');self.listbox.bind("<B1-Motion>",self.frame_drag_move)
+        self.listbox.configure(yscrollcommand=frame_scroll.set);self.listbox.bind("<<ListboxSelect>>",self.pick_frame);self.listbox.bind("<Double-Button-1>",self.rename_frame);self.listbox.bind("<F2>",self.rename_frame);self.listbox.bind("<ButtonPress-1>",self.frame_drag_start,add='+');self.listbox.bind("<B1-Motion>",self.frame_drag_move)
         r=ttk.Frame(left);r.pack(fill="x",pady=6)
         for t,c in [("↑",lambda:self.move(-1)),("↓",lambda:self.move(1)),("Duplicate",self.duplicate_frame),("Delete",self.delete_frame)]:ttk.Button(r,text=t,command=c).pack(side="left",padx=2)
+        frame_actions=ttk.Menubutton(left,text="Frame actions ▾")
+        frame_actions.pack(fill="x",pady=(0,6))
+        frame_menu=tk.Menu(frame_actions,tearoff=0)
+        frame_menu.add_command(label="Rename selected frame",command=self.rename_frame)
+        frame_menu.add_separator()
+        frame_menu.add_command(label="Download selected labelled frame…",command=self.save_selected_frame)
+        frame_menu.add_command(label="Download all labelled frames…",command=self.save_all_frames)
+        frame_actions.configure(menu=frame_menu)
         ttk.Label(left,text="Frame duration (seconds)").pack(anchor="w");self.duration=tk.StringVar(value="1.0");self.duration_input=ttk.Spinbox(left,from_=0.1,to=3600,increment=.1,textvariable=self.duration,width=8,command=self.apply_duration);self.duration_input.pack(anchor="w");self.duration_input.bind("<KeyRelease>",lambda e:self.apply_duration());self.duration_input.bind("<FocusOut>",lambda e:self.apply_duration())
         ttk.Label(left,text="Transition into this frame").pack(anchor="w",pady=(7,0));self.transition=tk.StringVar(value="Cut");self.transition_input=ttk.Combobox(left,values=TRANSITIONS,textvariable=self.transition,state="readonly",width=13);self.transition_input.pack(anchor="w");self.transition_input.bind("<<ComboboxSelected>>",lambda e:self.apply_transition())
         ttk.Label(left,text="Transition duration (seconds)").pack(anchor="w");self.transition_duration_value=tk.StringVar(value="0.3");self.transition_duration_input=ttk.Spinbox(left,from_=0.1,to=10,increment=.1,textvariable=self.transition_duration_value,width=8,command=self.apply_transition);self.transition_duration_input.pack(anchor="w");self.transition_duration_input.bind("<KeyRelease>",lambda e:self.apply_transition());self.transition_duration_input.bind("<FocusOut>",lambda e:self.apply_transition())
@@ -197,8 +205,38 @@ class Animator(tk.Tk):
             self.selected=labels[0].get('id') if labels else None
             self.timeline_active=False;self.draw();self.load_fields();self.load_duration();self.load_transition()
     def rename_frame(self,e=None):
+        selection=self.listbox.curselection()
+        if selection:self.current=selection[0]
         if self.current<0:return
-        box=tk.Toplevel(self);box.title("Rename frame");v=tk.StringVar(value=self.frames[self.current]['name']);ttk.Entry(box,textvariable=v,width=35).pack(padx=10,pady=10);ttk.Button(box,text="Save",command=lambda:(self._snapshot(),self.frames[self.current].update(name=v.get().strip() or 'Untitled frame'),box.destroy(),self.refresh())).pack(pady=(0,10))
+        box=tk.Toplevel(self);box.title("Rename frame");box.transient(self)
+        v=tk.StringVar(value=self.frames[self.current]['name']);entry=ttk.Entry(box,textvariable=v,width=35);entry.pack(padx=10,pady=10)
+        def save():
+            self._snapshot();self.frames[self.current].update(name=v.get().strip() or 'Untitled frame');box.destroy();self.refresh();self.status.set('Renamed frame.')
+        ttk.Button(box,text="Save",command=save).pack(pady=(0,10));entry.bind("<Return>",lambda event:save());entry.focus_set();entry.selection_range(0,'end')
+    def frame_download_name(self, index, frame):
+        stem=re.sub(r'[<>:"/\\|?*]+','_',frame.get('name','frame')).strip(' .') or 'frame'
+        return f"{index+1:02d} - {stem}.png"
+    def save_selected_frame(self):
+        if not 0<=self.current<len(self.frames):return
+        frame=self.frames[self.current]
+        name=filedialog.asksaveasfilename(defaultextension='.png',initialfile=self.frame_download_name(self.current,frame),filetypes=[("PNG picture with labels","*.png")])
+        if not name:return
+        try:
+            self.render_frame_image(frame,None).save(name,format='PNG');self.status.set(f"Downloaded labelled frame: {Path(name).name}")
+        except OSError as error:messagebox.showerror(APP,f"Could not download picture:\n{error}")
+    def save_all_frames(self):
+        if not self.frames:return
+        folder=filedialog.askdirectory(title="Choose folder for frame pictures")
+        if not folder:return
+        try:
+            destination=Path(folder);saved=0
+            for index,frame in enumerate(self.frames):
+                output=destination/self.frame_download_name(index,frame)
+                if output.exists():
+                    output=output.with_name(f"{output.stem} (download){output.suffix}")
+                self.render_frame_image(frame,None).save(output,format='PNG');saved+=1
+            self.status.set(f"Downloaded {saved} labelled frame picture(s).")
+        except OSError as error:messagebox.showerror(APP,f"Could not download pictures:\n{error}")
     def move(self,d):
         n=self.current+d
         if 0<=n<len(self.frames):self._snapshot();self.frames[self.current],self.frames[n]=self.frames[n],self.frames[self.current];self.current=n;self.refresh()

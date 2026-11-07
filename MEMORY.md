@@ -25,6 +25,7 @@ The main user requirement is simple: the app must do what the user asks without 
 - Label animation choices are None, Fade in/out, Slide left/right, Pop, Pulse, Bounce, Wiggle, and Typewriter.
 - Each frame can have independent duration and transition settings. “Apply timing to selected” applies only to the selected frame.
 - The frame list has a scrollbar.
+- Frame actions must provide a reliable way to rename the selected frame and download the selected frame (or all frames) as PNG pictures with their labels baked in.
 - The right-side controls must stay compact so the preview panel does not become too narrow.
 - Label actions (Add/Delete) and preset actions (Save/Apply) are grouped into menus to conserve control-panel space.
 - Playback must visibly update the preview as the playhead moves.
